@@ -117,6 +117,22 @@ export default function RitualMaze() {
     return true;
   };
 
+  const drawArrow = (ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, size: number, color: string, alpha = 1) => {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(size, 0);
+    ctx.lineTo(-size * 0.6, size * 0.55);
+    ctx.lineTo(-size * 0.25, 0);
+    ctx.lineTo(-size * 0.6, -size * 0.55);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  };
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     const img = imgRef.current;
@@ -126,17 +142,37 @@ export default function RitualMaze() {
     ctx.fillRect(0, 0, SIZE, SIZE);
     ctx.drawImage(img, 0, 0, SIZE, SIZE);
 
-    // start marker
-    const s = startRef.current;
-    ctx.fillStyle = "#d4b878";
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, 6, 0, Math.PI * 2);
-    ctx.fill();
+    // flow arrows along path
+    for (const a of flowArrowsRef.current) {
+      drawArrow(ctx, a.x, a.y, a.angle, 5, "#1f6b48", 0.55);
+    }
 
-    // finish marker (pulsing ring)
-    const f = finishRef.current;
-    ctx.strokeStyle = "#d4b878";
+    // START marker — green dot with arrow pointing OUTWARD (away from maze)
+    const s = startRef.current;
+    const sd = startDirRef.current;
+    // outward = opposite of direction into maze
+    const outAngleS = Math.atan2(-sd.y, -sd.x);
+    // place arrow just outside the start point
+    const sox = s.x - sd.x * 14;
+    const soy = s.y - sd.y * 14;
+    drawArrow(ctx, sox, soy, outAngleS, 11, "#4ade80");
+    ctx.fillStyle = "#4ade80";
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#0a3d24";
     ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // EXIT marker — gold ring with arrow pointing OUTWARD
+    const f = finishRef.current;
+    const fd = finishDirRef.current;
+    const outAngleF = Math.atan2(fd.y, fd.x);
+    const fox = f.x + fd.x * 14;
+    const foy = f.y + fd.y * 14;
+    drawArrow(ctx, fox, foy, outAngleF, 11, "#d4b878");
+    ctx.strokeStyle = "#d4b878";
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.arc(f.x, f.y, 8, 0, Math.PI * 2);
     ctx.stroke();
