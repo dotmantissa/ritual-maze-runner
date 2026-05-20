@@ -7,6 +7,8 @@ const SIZE = 480; // canvas px
 const PLAYER_R = 4;
 const STEP = 1.6;
 
+type Arrow = { x: number; y: number; angle: number };
+
 export default function RitualMaze() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskRef = useRef<Uint8ClampedArray | null>(null); // 1 = walkable
@@ -14,6 +16,9 @@ export default function RitualMaze() {
   const playerRef = useRef({ x: 0, y: 0 });
   const startRef = useRef({ x: 0, y: 0 });
   const finishRef = useRef({ x: 0, y: 0 });
+  const startDirRef = useRef({ x: 0, y: 1 }); // direction INTO the maze from start
+  const finishDirRef = useRef({ x: 0, y: 1 }); // direction OUT of the maze at finish
+  const flowArrowsRef = useRef<Arrow[]>([]);
   const keysRef = useRef<Record<string, boolean>>({});
   const dragRef = useRef<{ active: boolean; x: number; y: number }>({ active: false, x: 0, y: 0 });
   const startTimeRef = useRef(0);
