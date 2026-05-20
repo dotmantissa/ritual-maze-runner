@@ -69,6 +69,33 @@ export default function RitualMaze() {
       startRef.current = start;
       finishRef.current = finish;
       playerRef.current = { ...start };
+
+      // BFS from start to finish to determine the flow path
+      const path = bfsPath(mask, start, finish);
+      if (path.length > 2) {
+        // Direction into the maze from start: from start toward next path point
+        const a = path[Math.min(8, path.length - 1)];
+        const dxs = a.x - start.x, dys = a.y - start.y;
+        const ls = Math.hypot(dxs, dys) || 1;
+        startDirRef.current = { x: dxs / ls, y: dys / ls };
+        // Direction out of finish: continue last segment outward
+        const b = path[Math.max(0, path.length - 9)];
+        const dxf = finish.x - b.x, dyf = finish.y - b.y;
+        const lf = Math.hypot(dxf, dyf) || 1;
+        finishDirRef.current = { x: dxf / lf, y: dyf / lf };
+
+        // Sample arrows along path
+        const arrows: Arrow[] = [];
+        const spacing = 28;
+        for (let i = spacing; i < path.length - spacing; i += spacing) {
+          const p0 = path[Math.max(0, i - 6)];
+          const p1 = path[Math.min(path.length - 1, i + 6)];
+          const ang = Math.atan2(p1.y - p0.y, p1.x - p0.x);
+          arrows.push({ x: path[i].x, y: path[i].y, angle: ang });
+        }
+        flowArrowsRef.current = arrows;
+      }
+
       setPhase("ready");
       draw();
     };
