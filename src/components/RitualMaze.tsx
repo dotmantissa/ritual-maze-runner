@@ -7,6 +7,8 @@ const SIZE = 480; // canvas px
 const PLAYER_R = 4;
 const STEP = 1.6;
 
+type Arrow = { x: number; y: number; angle: number };
+
 export default function RitualMaze() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskRef = useRef<Uint8ClampedArray | null>(null); // 1 = walkable
@@ -14,6 +16,9 @@ export default function RitualMaze() {
   const playerRef = useRef({ x: 0, y: 0 });
   const startRef = useRef({ x: 0, y: 0 });
   const finishRef = useRef({ x: 0, y: 0 });
+  const startDirRef = useRef({ x: 0, y: 1 }); // direction INTO the maze from start
+  const finishDirRef = useRef({ x: 0, y: 1 }); // direction OUT of the maze at finish
+  const flowArrowsRef = useRef<Arrow[]>([]);
   const keysRef = useRef<Record<string, boolean>>({});
   const dragRef = useRef<{ active: boolean; x: number; y: number }>({ active: false, x: 0, y: 0 });
   const startTimeRef = useRef(0);
@@ -64,6 +69,33 @@ export default function RitualMaze() {
       startRef.current = start;
       finishRef.current = finish;
       playerRef.current = { ...start };
+
+      // BFS from start to finish to determine the flow path
+      const path = bfsPath(mask, start, finish);
+      if (path.length > 2) {
+        // Direction into the maze from start: from start toward next path point
+        const a = path[Math.min(8, path.length - 1)];
+        const dxs = a.x - start.x, dys = a.y - start.y;
+        const ls = Math.hypot(dxs, dys) || 1;
+        startDirRef.current = { x: dxs / ls, y: dys / ls };
+        // Direction out of finish: continue last segment outward
+        const b = path[Math.max(0, path.length - 9)];
+        const dxf = finish.x - b.x, dyf = finish.y - b.y;
+        const lf = Math.hypot(dxf, dyf) || 1;
+        finishDirRef.current = { x: dxf / lf, y: dyf / lf };
+
+        // Sample arrows along path
+        const arrows: Arrow[] = [];
+        const spacing = 28;
+        for (let i = spacing; i < path.length - spacing; i += spacing) {
+          const p0 = path[Math.max(0, i - 6)];
+          const p1 = path[Math.min(path.length - 1, i + 6)];
+          const ang = Math.atan2(p1.y - p0.y, p1.x - p0.x);
+          arrows.push({ x: path[i].x, y: path[i].y, angle: ang });
+        }
+        flowArrowsRef.current = arrows;
+      }
+
       setPhase("ready");
       draw();
     };
@@ -85,6 +117,22 @@ export default function RitualMaze() {
     return true;
   };
 
+  const drawArrow = (ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, size: number, color: string, alpha = 1) => {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(size, 0);
+    ctx.lineTo(-size * 0.6, size * 0.55);
+    ctx.lineTo(-size * 0.25, 0);
+    ctx.lineTo(-size * 0.6, -size * 0.55);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  };
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     const img = imgRef.current;
@@ -94,17 +142,37 @@ export default function RitualMaze() {
     ctx.fillRect(0, 0, SIZE, SIZE);
     ctx.drawImage(img, 0, 0, SIZE, SIZE);
 
-    // start marker
-    const s = startRef.current;
-    ctx.fillStyle = "#d4b878";
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, 6, 0, Math.PI * 2);
-    ctx.fill();
+    // flow arrows along path
+    for (const a of flowArrowsRef.current) {
+      drawArrow(ctx, a.x, a.y, a.angle, 5, "#1f6b48", 0.55);
+    }
 
-    // finish marker (pulsing ring)
-    const f = finishRef.current;
-    ctx.strokeStyle = "#d4b878";
+    // START marker — green dot with arrow pointing OUTWARD (away from maze)
+    const s = startRef.current;
+    const sd = startDirRef.current;
+    // outward = opposite of direction into maze
+    const outAngleS = Math.atan2(-sd.y, -sd.x);
+    // place arrow just outside the start point
+    const sox = s.x - sd.x * 14;
+    const soy = s.y - sd.y * 14;
+    drawArrow(ctx, sox, soy, outAngleS, 11, "#4ade80");
+    ctx.fillStyle = "#4ade80";
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#0a3d24";
     ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // EXIT marker — gold ring with arrow pointing OUTWARD
+    const f = finishRef.current;
+    const fd = finishDirRef.current;
+    const outAngleF = Math.atan2(fd.y, fd.x);
+    const fox = f.x + fd.x * 14;
+    const foy = f.y + fd.y * 14;
+    drawArrow(ctx, fox, foy, outAngleF, 11, "#d4b878");
+    ctx.strokeStyle = "#d4b878";
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.arc(f.x, f.y, 8, 0, Math.PI * 2);
     ctx.stroke();
@@ -301,4 +369,55 @@ function Overlay({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
+}
+
+// BFS over walkable mask from start toward finish; returns approximate path.
+// Uses a coarse grid (step 4) for speed.
+function bfsPath(
+  mask: Uint8ClampedArray,
+  start: { x: number; y: number },
+  finish: { x: number; y: number },
+): { x: number; y: number }[] {
+  const SIZE = 480;
+  const STEP = 4;
+  const W = Math.floor(SIZE / STEP);
+  const idx = (cx: number, cy: number) => cy * W + cx;
+  const walkable = (cx: number, cy: number) => {
+    const x = cx * STEP, y = cy * STEP;
+    if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return false;
+    return mask[y * SIZE + x] === 1;
+  };
+  const sx = Math.floor(start.x / STEP), sy = Math.floor(start.y / STEP);
+  const fx = Math.floor(finish.x / STEP), fy = Math.floor(finish.y / STEP);
+  const prev = new Int32Array(W * W).fill(-1);
+  const visited = new Uint8Array(W * W);
+  const queue: number[] = [idx(sx, sy)];
+  visited[idx(sx, sy)] = 1;
+  const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  let found = false;
+  while (queue.length) {
+    const cur = queue.shift()!;
+    const cx = cur % W, cy = Math.floor(cur / W);
+    if (cx === fx && cy === fy) { found = true; break; }
+    for (const [dx, dy] of dirs) {
+      const nx = cx + dx, ny = cy + dy;
+      if (nx < 0 || ny < 0 || nx >= W || ny >= W) continue;
+      const ni = idx(nx, ny);
+      if (visited[ni] || !walkable(nx, ny)) continue;
+      visited[ni] = 1;
+      prev[ni] = cur;
+      queue.push(ni);
+    }
+  }
+  if (!found) return [];
+  const path: { x: number; y: number }[] = [];
+  let cur = idx(fx, fy);
+  while (cur !== -1) {
+    const cx = cur % W, cy = Math.floor(cur / W);
+    path.push({ x: cx * STEP, y: cy * STEP });
+    if (cx === sx && cy === sy) break;
+    cur = prev[cur];
+  }
+  path.reverse();
+  return path;
 }
