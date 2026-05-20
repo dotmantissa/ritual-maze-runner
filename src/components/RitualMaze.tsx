@@ -370,3 +370,54 @@ function Overlay({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
+// BFS over walkable mask from start toward finish; returns approximate path.
+// Uses a coarse grid (step 4) for speed.
+function bfsPath(
+  mask: Uint8ClampedArray,
+  start: { x: number; y: number },
+  finish: { x: number; y: number },
+): { x: number; y: number }[] {
+  const SIZE = 480;
+  const STEP = 4;
+  const W = Math.floor(SIZE / STEP);
+  const idx = (cx: number, cy: number) => cy * W + cx;
+  const walkable = (cx: number, cy: number) => {
+    const x = cx * STEP, y = cy * STEP;
+    if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return false;
+    return mask[y * SIZE + x] === 1;
+  };
+  const sx = Math.floor(start.x / STEP), sy = Math.floor(start.y / STEP);
+  const fx = Math.floor(finish.x / STEP), fy = Math.floor(finish.y / STEP);
+  const prev = new Int32Array(W * W).fill(-1);
+  const visited = new Uint8Array(W * W);
+  const queue: number[] = [idx(sx, sy)];
+  visited[idx(sx, sy)] = 1;
+  const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  let found = false;
+  while (queue.length) {
+    const cur = queue.shift()!;
+    const cx = cur % W, cy = Math.floor(cur / W);
+    if (cx === fx && cy === fy) { found = true; break; }
+    for (const [dx, dy] of dirs) {
+      const nx = cx + dx, ny = cy + dy;
+      if (nx < 0 || ny < 0 || nx >= W || ny >= W) continue;
+      const ni = idx(nx, ny);
+      if (visited[ni] || !walkable(nx, ny)) continue;
+      visited[ni] = 1;
+      prev[ni] = cur;
+      queue.push(ni);
+    }
+  }
+  if (!found) return [];
+  const path: { x: number; y: number }[] = [];
+  let cur = idx(fx, fy);
+  while (cur !== -1) {
+    const cx = cur % W, cy = Math.floor(cur / W);
+    path.push({ x: cx * STEP, y: cy * STEP });
+    if (cx === sx && cy === sy) break;
+    cur = prev[cur];
+  }
+  path.reverse();
+  return path;
+}
