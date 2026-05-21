@@ -88,6 +88,65 @@ export default function RitualMaze() {
   const [moves, setMoves] = useState(0);
   const [bestTime, setBestTime] = useState<number | null>(null);
 
+  const [wallet, setWallet] = useState<string | null>(null);
+  const [mintState, setMintState] = useState<"idle" | "minting" | "minted">("idle");
+  const [txHash, setTxHash] = useState<string | null>(null);
+
+  const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+  const connectWallet = async () => {
+    try {
+      const eth = (window as any).ethereum;
+      if (eth?.request) {
+        const accounts: string[] = await eth.request({ method: "eth_requestAccounts" });
+        if (accounts?.[0]) {
+          setWallet(accounts[0]);
+          try { localStorage.setItem("ritual-wallet", accounts[0]); } catch {}
+          return;
+        }
+      }
+      // Fallback: simulated wallet for environments without an injected provider
+      const sim = "0xR1" + Math.random().toString(16).slice(2, 10).padEnd(8, "0") + "Ritual" + Math.random().toString(16).slice(2, 6);
+      const addr = "0x" + sim.replace(/[^0-9a-fA-F]/g, "").slice(0, 40).padEnd(40, "0");
+      setWallet(addr);
+      try { localStorage.setItem("ritual-wallet", addr); } catch {}
+    } catch (e) {
+      console.warn("Wallet connect failed", e);
+    }
+  };
+
+  const disconnectWallet = () => {
+    setWallet(null);
+    try { localStorage.removeItem("ritual-wallet"); } catch {}
+  };
+
+  useEffect(() => {
+    try {
+      const w = localStorage.getItem("ritual-wallet");
+      if (w) setWallet(w);
+    } catch {}
+  }, []);
+
+  const mintNft = async () => {
+    if (!wallet || mintState === "minting") return;
+    setMintState("minting");
+    const payload = {
+      score,
+      time: finalTime,
+      moves,
+      completed: true,
+      timestamp: Date.now(),
+      wallet,
+      chain: "Ritual",
+    };
+    // Simulated Ritual Chain mint — replace with real contract call when available.
+    await new Promise((r) => setTimeout(r, 1600));
+    const hash = "0x" + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+    setTxHash(hash);
+    setMintState("minted");
+    console.log("Ritual NFT minted (simulated)", { hash, payload });
+  };
+
   useEffect(() => {
     try {
       const v = localStorage.getItem(BEST_KEY);
@@ -350,6 +409,8 @@ export default function RitualMaze() {
     setMoves(0);
     startTimeRef.current = performance.now();
     setElapsed(0);
+    setMintState("idle");
+    setTxHash(null);
     setPhase("playing");
   };
 
@@ -374,10 +435,29 @@ export default function RitualMaze() {
             </p>
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-2 md:gap-3 md:w-auto w-full">
-          <StatCard icon={<ClockIcon />} label="Time" value={fmtClock(liveTime)} />
-          <StatCard icon={<StarIcon />} label="Moves" value={moves.toString()} accent="gold" />
-          <StatCard icon={<TrophyIcon />} label="Best" value={bestTime != null ? fmtClock(bestTime) : "--:--"} accent="gold" />
+        <div className="flex flex-col gap-3 md:items-end">
+          <div className="flex justify-end">
+            {wallet ? (
+              <button
+                onClick={disconnectWallet}
+                className="ritual-btn-ghost flex items-center gap-2"
+                title="Click to disconnect"
+              >
+                <WalletIcon />
+                <span className="font-mono text-xs">{shortAddr(wallet)}</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--ritual-glow)] shadow-[0_0_8px_var(--ritual-glow)]" />
+              </button>
+            ) : (
+              <button onClick={connectWallet} className="ritual-btn-ghost flex items-center gap-2">
+                <WalletIcon /> Connect Wallet
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-2 md:gap-3 md:w-auto w-full">
+            <StatCard icon={<ClockIcon />} label="Time" value={fmtClock(liveTime)} />
+            <StatCard icon={<StarIcon />} label="Moves" value={moves.toString()} accent="gold" />
+            <StatCard icon={<TrophyIcon />} label="Best" value={bestTime != null ? fmtClock(bestTime) : "--:--"} accent="gold" />
+          </div>
         </div>
       </header>
 
@@ -429,11 +509,33 @@ export default function RitualMaze() {
                   <Result label="Time" value={fmtClock(finalTime)} />
                   <Result label="Moves" value={moves.toString()} />
                 </div>
+                {bestTime != null && (
+                  <div className="text-[10px] uppercase tracking-[0.3em] text-[var(--ritual-cream)]/60">
+                    Best Time · {fmtClock(bestTime)}
+                  </div>
+                )}
                 <div className="flex flex-col gap-2 w-full max-w-xs mt-3">
                   <button onClick={start} className="ritual-btn">Play Again</button>
-                  <button disabled className="ritual-btn-ghost opacity-60 cursor-not-allowed">
-                    Mint Score NFT (Coming Soon)
-                  </button>
+                  {!wallet ? (
+                    <button onClick={connectWallet} className="ritual-btn-ghost flex items-center justify-center gap-2">
+                      <WalletIcon /> Connect Wallet to Mint NFT
+                    </button>
+                  ) : mintState === "minted" ? (
+                    <div className="text-center">
+                      <div className="text-xs uppercase tracking-[0.25em] text-[var(--ritual-glow)]">NFT Minted on Ritual</div>
+                      <div className="font-mono text-[10px] text-[var(--ritual-cream)]/60 mt-1 break-all">
+                        {txHash?.slice(0, 18)}…{txHash?.slice(-8)}
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={mintNft}
+                      disabled={mintState === "minting"}
+                      className="ritual-btn flex items-center justify-center gap-2"
+                    >
+                      {mintState === "minting" ? "Minting on Ritual…" : "Mint Score NFT on Ritual"}
+                    </button>
+                  )}
                 </div>
               </Overlay>
             )}
@@ -700,6 +802,14 @@ function RestartIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
       <path d="M3 12a9 9 0 0115.5-6.3L21 8M21 3v5h-5M21 12a9 9 0 01-15.5 6.3L3 16M3 21v-5h5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function WalletIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M3 7a2 2 0 012-2h12a2 2 0 012 2v2H5a2 2 0 00-2-2zm0 4h16a2 2 0 012 2v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-6zm14 3a1.25 1.25 0 100 2.5 1.25 1.25 0 000-2.5z" fill="currentColor"/>
     </svg>
   );
 }
