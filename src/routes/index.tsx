@@ -13,7 +13,7 @@ export const Route = createFileRoute("/")({
 
 function Index() {
   return (
-    <main className="min-h-screen w-full flex items-center justify-center p-4 bg-[var(--ritual-green-deep)]">
+    <main className="min-h-screen w-full">
       <RitualMaze />
     </main>
   );
