@@ -806,6 +806,14 @@ function RestartIcon() {
   );
 }
 
+function WalletIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M3 7a2 2 0 012-2h12a2 2 0 012 2v2H5a2 2 0 00-2-2zm0 4h16a2 2 0 012 2v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-6zm14 3a1.25 1.25 0 100 2.5 1.25 1.25 0 000-2.5z" fill="currentColor"/>
+    </svg>
+  );
+}
+
 function StarShape({ filled }: { filled: boolean }) {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill={filled ? "var(--ritual-glow)" : "none"} className="text-[var(--ritual-glow)]">
