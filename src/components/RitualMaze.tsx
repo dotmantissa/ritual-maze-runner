@@ -433,10 +433,29 @@ export default function RitualMaze() {
             </p>
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-2 md:gap-3 md:w-auto w-full">
-          <StatCard icon={<ClockIcon />} label="Time" value={fmtClock(liveTime)} />
-          <StatCard icon={<StarIcon />} label="Moves" value={moves.toString()} accent="gold" />
-          <StatCard icon={<TrophyIcon />} label="Best" value={bestTime != null ? fmtClock(bestTime) : "--:--"} accent="gold" />
+        <div className="flex flex-col gap-3 md:items-end">
+          <div className="flex justify-end">
+            {wallet ? (
+              <button
+                onClick={disconnectWallet}
+                className="ritual-btn-ghost flex items-center gap-2"
+                title="Click to disconnect"
+              >
+                <WalletIcon />
+                <span className="font-mono text-xs">{shortAddr(wallet)}</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--ritual-glow)] shadow-[0_0_8px_var(--ritual-glow)]" />
+              </button>
+            ) : (
+              <button onClick={connectWallet} className="ritual-btn-ghost flex items-center gap-2">
+                <WalletIcon /> Connect Wallet
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-2 md:gap-3 md:w-auto w-full">
+            <StatCard icon={<ClockIcon />} label="Time" value={fmtClock(liveTime)} />
+            <StatCard icon={<StarIcon />} label="Moves" value={moves.toString()} accent="gold" />
+            <StatCard icon={<TrophyIcon />} label="Best" value={bestTime != null ? fmtClock(bestTime) : "--:--"} accent="gold" />
+          </div>
         </div>
       </header>
 
