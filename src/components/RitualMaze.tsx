@@ -509,11 +509,33 @@ export default function RitualMaze() {
                   <Result label="Time" value={fmtClock(finalTime)} />
                   <Result label="Moves" value={moves.toString()} />
                 </div>
+                {bestTime != null && (
+                  <div className="text-[10px] uppercase tracking-[0.3em] text-[var(--ritual-cream)]/60">
+                    Best Time · {fmtClock(bestTime)}
+                  </div>
+                )}
                 <div className="flex flex-col gap-2 w-full max-w-xs mt-3">
                   <button onClick={start} className="ritual-btn">Play Again</button>
-                  <button disabled className="ritual-btn-ghost opacity-60 cursor-not-allowed">
-                    Mint Score NFT (Coming Soon)
-                  </button>
+                  {!wallet ? (
+                    <button onClick={connectWallet} className="ritual-btn-ghost flex items-center justify-center gap-2">
+                      <WalletIcon /> Connect Wallet to Mint NFT
+                    </button>
+                  ) : mintState === "minted" ? (
+                    <div className="text-center">
+                      <div className="text-xs uppercase tracking-[0.25em] text-[var(--ritual-glow)]">NFT Minted on Ritual</div>
+                      <div className="font-mono text-[10px] text-[var(--ritual-cream)]/60 mt-1 break-all">
+                        {txHash?.slice(0, 18)}…{txHash?.slice(-8)}
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={mintNft}
+                      disabled={mintState === "minting"}
+                      className="ritual-btn flex items-center justify-center gap-2"
+                    >
+                      {mintState === "minting" ? "Minting on Ritual…" : "Mint Score NFT on Ritual"}
+                    </button>
+                  )}
                 </div>
               </Overlay>
             )}
