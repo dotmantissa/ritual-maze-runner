@@ -88,6 +88,65 @@ export default function RitualMaze() {
   const [moves, setMoves] = useState(0);
   const [bestTime, setBestTime] = useState<number | null>(null);
 
+  const [wallet, setWallet] = useState<string | null>(null);
+  const [mintState, setMintState] = useState<"idle" | "minting" | "minted">("idle");
+  const [txHash, setTxHash] = useState<string | null>(null);
+
+  const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+  const connectWallet = async () => {
+    try {
+      const eth = (window as any).ethereum;
+      if (eth?.request) {
+        const accounts: string[] = await eth.request({ method: "eth_requestAccounts" });
+        if (accounts?.[0]) {
+          setWallet(accounts[0]);
+          try { localStorage.setItem("ritual-wallet", accounts[0]); } catch {}
+          return;
+        }
+      }
+      // Fallback: simulated wallet for environments without an injected provider
+      const sim = "0xR1" + Math.random().toString(16).slice(2, 10).padEnd(8, "0") + "Ritual" + Math.random().toString(16).slice(2, 6);
+      const addr = "0x" + sim.replace(/[^0-9a-fA-F]/g, "").slice(0, 40).padEnd(40, "0");
+      setWallet(addr);
+      try { localStorage.setItem("ritual-wallet", addr); } catch {}
+    } catch (e) {
+      console.warn("Wallet connect failed", e);
+    }
+  };
+
+  const disconnectWallet = () => {
+    setWallet(null);
+    try { localStorage.removeItem("ritual-wallet"); } catch {}
+  };
+
+  useEffect(() => {
+    try {
+      const w = localStorage.getItem("ritual-wallet");
+      if (w) setWallet(w);
+    } catch {}
+  }, []);
+
+  const mintNft = async () => {
+    if (!wallet || mintState === "minting") return;
+    setMintState("minting");
+    const payload = {
+      score,
+      time: finalTime,
+      moves,
+      completed: true,
+      timestamp: Date.now(),
+      wallet,
+      chain: "Ritual",
+    };
+    // Simulated Ritual Chain mint — replace with real contract call when available.
+    await new Promise((r) => setTimeout(r, 1600));
+    const hash = "0x" + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+    setTxHash(hash);
+    setMintState("minted");
+    console.log("Ritual NFT minted (simulated)", { hash, payload });
+  };
+
   useEffect(() => {
     try {
       const v = localStorage.getItem(BEST_KEY);
