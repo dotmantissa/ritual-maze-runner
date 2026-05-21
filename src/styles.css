@@ -29,32 +29,35 @@
 
 :root {
   --radius: 0.5rem;
-  /* Ritual dark green */
-  --background: oklch(0.32 0.07 155);
+  --background: oklch(0.18 0.04 155);
   --foreground: oklch(0.98 0.01 100);
-  --card: oklch(0.28 0.06 155);
+  --card: oklch(0.22 0.05 155);
   --card-foreground: oklch(0.98 0.01 100);
   --primary: oklch(0.98 0.01 100);
-  --primary-foreground: oklch(0.32 0.07 155);
-  --secondary: oklch(0.38 0.07 155);
+  --primary-foreground: oklch(0.22 0.05 155);
+  --secondary: oklch(0.28 0.06 155);
   --secondary-foreground: oklch(0.98 0.01 100);
-  --muted: oklch(0.38 0.05 155);
+  --muted: oklch(0.28 0.05 155);
   --muted-foreground: oklch(0.82 0.02 120);
   --accent: oklch(0.85 0.12 90);
-  --accent-foreground: oklch(0.32 0.07 155);
-  --border: oklch(0.45 0.06 155);
+  --accent-foreground: oklch(0.22 0.05 155);
+  --border: oklch(0.35 0.06 155);
   --ring: oklch(0.85 0.12 90);
-  --ritual-green: #1f6b48;
-  --ritual-green-deep: #154d34;
+  --ritual-green: #0a2418;
+  --ritual-green-deep: #04110a;
   --ritual-cream: #f5f1e8;
-  --ritual-gold: #d4b878;
+  --ritual-gold: #f5d68a;
+  --ritual-glow: #4ade80;
 }
 
 @layer base {
   * { border-color: var(--color-border); }
   html, body, #root { height: 100%; }
   body {
-    background-color: var(--ritual-green-deep);
+    background:
+      radial-gradient(1200px 600px at 20% 10%, rgba(74,222,128,0.08), transparent 60%),
+      radial-gradient(900px 500px at 80% 90%, rgba(74,222,128,0.06), transparent 60%),
+      var(--ritual-green-deep);
     color: var(--color-foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
