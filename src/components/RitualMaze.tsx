@@ -409,6 +409,8 @@ export default function RitualMaze() {
     setMoves(0);
     startTimeRef.current = performance.now();
     setElapsed(0);
+    setMintState("idle");
+    setTxHash(null);
     setPhase("playing");
   };
 
