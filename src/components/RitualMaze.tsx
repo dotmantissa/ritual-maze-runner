@@ -38,9 +38,8 @@ type EthereumProvider = {
 
 const SIZE = 480;
 const CELL = 10;
-const INITIAL_THRESHOLD = 130;
-const MIN_THRESHOLD = 80;
-const COMPONENT_TARGET_SIZE = 5000;
+const THRESHOLD = 130;
+const MIN_COMPONENT_SIZE = 30;
 const PLAYER_R = 6;
 const BEST_KEY = "ritual-knot-best-time";
 const SWIPE_THRESHOLD = 20;
@@ -67,7 +66,7 @@ const REVERSE_DIR: Record<Dir, Dir> = {
   "down-left": "up-right",
 };
 
-const GAP_BRIDGE_DISTANCE = 3;
+const GAP_BRIDGE_DISTANCE = 5;
 
 const INPUT_MAP: Record<string, Dir[]> = {
   arrowup: ["up", "up-left", "up-right"],
@@ -152,12 +151,12 @@ function logReachability(nodesMap: Map<NodeId, MazeNode>, startNode: MazeNode, e
       if (edgeId) queue.push(edgeId);
     });
   }
-  console.log("Reachable nodes:", visited.size, "/", nodesMap.size);
+  console.log("Reachable:", visited.size, "/", nodesMap.size);
   console.log("EXIT reachable:", visited.has(exitNode.id));
   return visited;
 }
 
-function extractWalkablePixels(data: Uint8ClampedArray, threshold: number) {
+function extractWalkablePixels(data: Uint8ClampedArray) {
   const walkable = new Set<number>();
   for (let y = 0; y < SIZE; y++) {
     for (let x = 0; x < SIZE; x++) {
@@ -165,7 +164,7 @@ function extractWalkablePixels(data: Uint8ClampedArray, threshold: number) {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
-      if (r > threshold && g > threshold && b > threshold) {
+      if (r > THRESHOLD && g > THRESHOLD && b > THRESHOLD) {
         walkable.add(y * SIZE + x);
       }
     }
@@ -196,41 +195,33 @@ function floodFill(seed: number, walkable: Set<number>, visited: Set<number>) {
   return component;
 }
 
-function findLargestComponent(walkable: Set<number>) {
+function extractMasterPixels(walkable: Set<number>, minComponentSize: number) {
   const visited = new Set<number>();
-  let largestComponent = new Set<number>();
+  const allComponents: Array<Set<number>> = [];
   for (const idx of walkable) {
     if (visited.has(idx)) continue;
     const component = floodFill(idx, walkable, visited);
-    if (component.size > largestComponent.size) {
-      largestComponent = component;
+    if (component.size >= minComponentSize) {
+      allComponents.push(component);
     }
   }
-  return largestComponent;
+
+  const masterPixels = new Set<number>();
+  for (const component of allComponents) {
+    for (const idx of component) {
+      masterPixels.add(idx);
+    }
+  }
+
+  console.log("Total components found:", allComponents.length);
+  console.log("Total walkable pixels across all components:", masterPixels.size);
+  return masterPixels;
 }
 
-function extractLargestComponent(data: Uint8ClampedArray) {
-  let threshold = INITIAL_THRESHOLD;
-  let largestComponent = new Set<number>();
-  while (threshold >= MIN_THRESHOLD && largestComponent.size < COMPONENT_TARGET_SIZE) {
-    const walkable = extractWalkablePixels(data, threshold);
-    largestComponent = findLargestComponent(walkable);
-    console.log(`Threshold ${threshold}: largest component = ${largestComponent.size} pixels`);
-    if (largestComponent.size < COMPONENT_TARGET_SIZE) threshold -= 10;
-  }
-  console.log("Final threshold used:", threshold);
-  console.log("Final component size:", largestComponent.size);
-  if (largestComponent.size === 0) {
-    throw new Error("No walkable knot pixels were found.");
-  }
-  return largestComponent;
-}
-
-function buildMazeGraphFromImageData(data: Uint8ClampedArray): MazeGraph {
-  const component = extractLargestComponent(data);
+function buildMazeGraphFromPixels(masterPixels: Set<number>, gapBridgeDistance: number): MazeGraph {
   const nodesMap = new Map<NodeId, MazeNode>();
 
-  for (const idx of component) {
+  for (const idx of masterPixels) {
     const x = idx % SIZE;
     const y = Math.floor(idx / SIZE);
     const col = Math.floor(x / CELL);
@@ -247,7 +238,7 @@ function buildMazeGraphFromImageData(data: Uint8ClampedArray): MazeGraph {
       });
     }
   }
-  console.log("Nodes after sampling:", nodesMap.size);
+  console.log("Total nodes:", nodesMap.size);
 
   for (const node of nodesMap.values()) {
     for (const { name: direction, dc, dr } of DIRECTIONS) {
@@ -256,8 +247,12 @@ function buildMazeGraphFromImageData(data: Uint8ClampedArray): MazeGraph {
       if (!neighbor) continue;
       const mx = Math.round((node.cx + neighbor.cx) / 2);
       const my = Math.round((node.cy + neighbor.cy) / 2);
-      if (component.has(my * SIZE + mx)) {
+      if (masterPixels.has(my * SIZE + mx)) {
         node.edges[direction] = neighbor.id;
+        const reverseDirection = REVERSE_DIR[direction];
+        if (!neighbor.edges[reverseDirection]) {
+          neighbor.edges[reverseDirection] = node.id;
+        }
       }
     }
   }
@@ -271,7 +266,7 @@ function buildMazeGraphFromImageData(data: Uint8ClampedArray): MazeGraph {
     for (const { name: direction, dc, dr } of DIRECTIONS) {
       if (node.edges[direction]) continue;
 
-      for (let step = 2; step <= GAP_BRIDGE_DISTANCE; step++) {
+      for (let step = 2; step <= gapBridgeDistance; step++) {
         const neighborKey = `${node.col + dc * step},${node.row + dr * step}`;
         const neighbor = nodesMap.get(neighborKey);
         if (!neighbor) continue;
@@ -307,19 +302,54 @@ function buildMazeGraphFromImageData(data: Uint8ClampedArray): MazeGraph {
 
   console.log("START cy:", startNode.cy, "| EXIT cy:", exitNode.cy);
   console.log("Canvas height:", SIZE, "- EXIT should be close to", SIZE);
+  console.log("START cy:", startNode.cy, "<- must be < 80");
+  console.log("EXIT cy:", exitNode.cy, "<- must be > 400");
   console.log("START:", startNode);
   console.log("EXIT:", exitNode);
-  logReachability(nodesMap, startNode, exitNode);
-  const graphBase = { nodesMap, startNode, exitNode, walkable: component };
+  const visited = logReachability(nodesMap, startNode, exitNode);
+  const graphBase = { nodesMap, startNode, exitNode, walkable: masterPixels };
   const solutionPath = bfsSolutionPath(graphBase);
   if (solutionPath.length < 2) {
     console.log("Total nodes:", nodesMap.size);
     console.log("START node:", startNode);
     console.log("EXIT node:", exitNode);
+    console.log("Reachable:", visited.size, "/", nodesMap.size);
+    console.log("EXIT reachable:", visited.has(exitNode.id));
     throw new Error("The extracted knot graph has no route from start to exit.");
   }
 
   return { ...graphBase, solutionPath };
+}
+
+function buildMazeGraphFromImageData(data: Uint8ClampedArray): MazeGraph {
+  const walkable = extractWalkablePixels(data);
+  let minComponentSize = MIN_COMPONENT_SIZE;
+  let gapBridgeDistance = GAP_BRIDGE_DISTANCE;
+
+  while (true) {
+    const masterPixels = extractMasterPixels(walkable, minComponentSize);
+    try {
+      const graph = buildMazeGraphFromPixels(masterPixels, gapBridgeDistance);
+      const tipsAreIncluded = graph.startNode.cy < 80 && graph.exitNode.cy > 400;
+      if (tipsAreIncluded) return graph;
+      if (minComponentSize === 10) return graph;
+      console.log("Top or bottom tip was filtered out; lowering MIN_COMPONENT_SIZE to 10.");
+      minComponentSize = 10;
+    } catch (error) {
+      if (gapBridgeDistance < 8) {
+        console.log("EXIT unreachable with GAP 5; increasing GAP to 8 and retrying.");
+        gapBridgeDistance = 8;
+        continue;
+      }
+      if (minComponentSize !== 10) {
+        console.log("Graph still disconnected; lowering MIN_COMPONENT_SIZE to 10.");
+        minComponentSize = 10;
+        gapBridgeDistance = GAP_BRIDGE_DISTANCE;
+        continue;
+      }
+      throw error;
+    }
+  }
 }
 
 function createHintArrows(graph: MazeGraph) {
