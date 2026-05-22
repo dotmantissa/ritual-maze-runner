@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import logoUrl from "@/assets/ritual-logo.jpg";
 
 type Phase = "loading" | "ready" | "playing" | "done";
-type Dir = "up" | "down" | "left" | "right";
+type Dir = "up" | "down" | "left" | "right" | "up-left" | "up-right" | "down-left" | "down-right";
 type NodeId = string;
 type DirectionalEdges = Record<Dir, NodeId | null>;
 
@@ -44,6 +44,28 @@ const PLAYER_R = 6;
 const BEST_KEY = "ritual-knot-best-time";
 const SWIPE_THRESHOLD = 20;
 
+const DIRECTIONS: Array<{ name: Dir; dc: number; dr: number }> = [
+  { name: "up", dc: 0, dr: -1 },
+  { name: "down", dc: 0, dr: 1 },
+  { name: "left", dc: -1, dr: 0 },
+  { name: "right", dc: 1, dr: 0 },
+  { name: "up-left", dc: -1, dr: -1 },
+  { name: "up-right", dc: 1, dr: -1 },
+  { name: "down-left", dc: -1, dr: 1 },
+  { name: "down-right", dc: 1, dr: 1 },
+];
+
+const INPUT_MAP: Record<string, Dir[]> = {
+  arrowup: ["up", "up-left", "up-right"],
+  w: ["up", "up-left", "up-right"],
+  arrowdown: ["down", "down-left", "down-right"],
+  s: ["down", "down-left", "down-right"],
+  arrowleft: ["left", "up-left", "down-left"],
+  a: ["left", "up-left", "down-left"],
+  arrowright: ["right", "up-right", "down-right"],
+  d: ["right", "up-right", "down-right"],
+};
+
 const fmtClock = (t: number) => {
   const m = Math.floor(t / 60)
     .toString()
@@ -55,7 +77,16 @@ const fmtClock = (t: number) => {
 };
 
 function emptyEdges(): DirectionalEdges {
-  return { up: null, down: null, left: null, right: null };
+  return {
+    up: null,
+    down: null,
+    left: null,
+    right: null,
+    "up-left": null,
+    "up-right": null,
+    "down-left": null,
+    "down-right": null,
+  };
 }
 
 function edgeEntries(edges: DirectionalEdges): Array<[Dir, NodeId]> {
@@ -71,15 +102,15 @@ function isWalkablePixel(walkable: Set<string>, x: number, y: number) {
   return walkable.has(`${px},${py}`);
 }
 
-function lineIsWalkable(walkable: Set<string>, from: MazeNode, to: MazeNode) {
+function lineIsWalkable(walkable: Set<string>, from: MazeNode, to: MazeNode, samples: number) {
   let hits = 0;
-  for (let i = 0; i < 5; i++) {
-    const t = i / 4;
+  for (let i = 0; i < samples; i++) {
+    const t = samples === 1 ? 0 : i / (samples - 1);
     const x = from.cx + (to.cx - from.cx) * t;
     const y = from.cy + (to.cy - from.cy) * t;
     if (isWalkablePixel(walkable, x, y)) hits += 1;
   }
-  return hits >= 4;
+  return hits >= samples - 1;
 }
 
 function bfsSolutionPath(graph: Omit<MazeGraph, "solutionPath">) {
@@ -167,17 +198,11 @@ function buildMazeGraphFromImageData(data: Uint8ClampedArray, threshold = THRESH
     }
   }
 
-  const neighborSpec: Array<[Dir, number, number]> = [
-    ["up", 0, -1],
-    ["down", 0, 1],
-    ["left", -1, 0],
-    ["right", 1, 0],
-  ];
-
   for (const node of nodesMap.values()) {
-    for (const [direction, dc, dr] of neighborSpec) {
+    for (const { name: direction, dc, dr } of DIRECTIONS) {
       const neighbor = nodeGrid[node.col + dc]?.[node.row + dr];
-      if (neighbor && lineIsWalkable(walkable, node, neighbor)) {
+      const isDiagonal = dc !== 0 && dr !== 0;
+      if (neighbor && lineIsWalkable(walkable, node, neighbor, isDiagonal ? 7 : 5)) {
         node.edges[direction] = neighbor.id;
       }
     }
@@ -600,7 +625,7 @@ export default function RitualMaze() {
   }, []);
 
   const tryMove = useCallback(
-    (dir: Dir) => {
+    (directions: Dir[]) => {
       if (phase === "ready") {
         start();
       }
@@ -611,8 +636,8 @@ export default function RitualMaze() {
       if (!activeNodeId) return;
       const node = graph.nodesMap.get(activeNodeId);
       if (!node) return;
-      const nextId = node.edges[dir];
-      if (nextId !== null && nextId !== undefined) {
+      const nextId = directions.map((direction) => node.edges[direction]).find((id) => id != null);
+      if (nextId != null) {
         if (timerRef.current == null) {
           startTimeRef.current = performance.now();
           timerRef.current = window.setInterval(() => {
@@ -642,9 +667,9 @@ export default function RitualMaze() {
     const dy = e.clientY - origin.y;
     if (Math.hypot(dx, dy) < SWIPE_THRESHOLD) return;
     if (Math.abs(dx) > Math.abs(dy)) {
-      tryMove(dx > 0 ? "right" : "left");
+      tryMove(INPUT_MAP[dx > 0 ? "arrowright" : "arrowleft"]);
     } else {
-      tryMove(dy > 0 ? "down" : "up");
+      tryMove(INPUT_MAP[dy > 0 ? "arrowdown" : "arrowup"]);
     }
   };
 
@@ -655,20 +680,10 @@ export default function RitualMaze() {
       return;
     }
     const key = e.key.toLowerCase();
-    const map: Record<string, Dir> = {
-      arrowup: "up",
-      w: "up",
-      arrowdown: "down",
-      s: "down",
-      arrowleft: "left",
-      a: "left",
-      arrowright: "right",
-      d: "right",
-    };
-    const dir = map[key];
-    if (!dir) return;
+    const directions = INPUT_MAP[key];
+    if (!directions) return;
     e.preventDefault();
-    tryMove(dir);
+    tryMove(directions);
   };
 
   useEffect(() => {
