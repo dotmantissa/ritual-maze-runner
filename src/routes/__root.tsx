@@ -10,6 +10,10 @@ import {
 
 import appCss from "../styles.css?url";
 
+const PRODUCTION_URL = "https://ritual-maze-runner.vercel.app";
+const META_DESCRIPTION =
+  "Find the path. Follow the arrows. Reach the exit. A Celtic knot maze experience.";
+
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -75,26 +79,39 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { title: "Ritual Knot Maze" },
       {
         name: "description",
-        content: "Navigate a Celtic-knot maze from the green start to the gold exit.",
+        content: META_DESCRIPTION,
       },
-      { name: "author", content: "Ritual Knot Maze" },
+      { property: "og:type", content: "website" },
+      { property: "og:url", content: PRODUCTION_URL },
       { property: "og:title", content: "Ritual Knot Maze" },
       {
         property: "og:description",
-        content: "Navigate a Celtic-knot maze from the green start to the gold exit.",
+        content: META_DESCRIPTION,
       },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
+      { property: "og:image", content: `${PRODUCTION_URL}/og-image.png` },
+      { property: "og:image:width", content: "1200" },
+      { property: "og:image:height", content: "630" },
+      { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "Ritual Knot Maze" },
       {
         name: "twitter:description",
-        content: "Navigate a Celtic-knot maze from the green start to the gold exit.",
+        content: META_DESCRIPTION,
       },
+      { name: "twitter:image", content: `${PRODUCTION_URL}/og-image.png` },
     ],
     links: [
       {
         rel: "stylesheet",
         href: appCss,
+      },
+      {
+        rel: "icon",
+        href: "/favicon.png",
+        type: "image/png",
+      },
+      {
+        rel: "manifest",
+        href: "/manifest.json",
       },
     ],
   }),

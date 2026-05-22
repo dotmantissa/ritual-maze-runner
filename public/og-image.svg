@@ -1,0 +1,24 @@
+
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="45%" r="65%">
+      <stop offset="0%" stop-color="#185d36"/>
+      <stop offset="58%" stop-color="#0a2e1a"/>
+      <stop offset="100%" stop-color="#04110a"/>
+    </radialGradient>
+    <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <path d="M0 548 C210 492 326 630 528 560 C742 486 843 596 1200 510 L1200 630 L0 630 Z" fill="#06160f" opacity="0.72"/>
+  <g transform="translate(600 215)" filter="url(#softGlow)">
+    <path d="M0 -128 L128 0 L0 128 L-128 0 Z" fill="none" stroke="#f5f1e8" stroke-width="14" stroke-linejoin="round" opacity="0.96"/>
+    <path d="M-76 -76 H-18 V-20 H18 V-76 H76 V-18 H20 V18 H76 V76 H18 V20 H-18 V76 H-76 V18 H-20 V-18 H-76 Z" fill="none" stroke="#f5f1e8" stroke-width="14" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="0" cy="-128" r="15" fill="#4ade80"/>
+    <circle cx="0" cy="128" r="15" fill="#f5d68a"/>
+  </g>
+  <text x="600" y="430" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="74" font-weight="700" fill="#f5f1e8">Ritual Knot Maze</text>
+  <text x="600" y="488" text-anchor="middle" font-family="Verdana, Arial, sans-serif" font-size="28" fill="#d7f6de">Find the path. Follow the arrows. Reach the exit.</text>
+</svg>

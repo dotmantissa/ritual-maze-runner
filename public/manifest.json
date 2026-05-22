@@ -1,0 +1,16 @@
+{
+  "name": "Ritual Knot Maze",
+  "short_name": "Knot Maze",
+  "description": "Find the path. Follow the arrows. Reach the exit.",
+  "theme_color": "#0a2e1a",
+  "background_color": "#0a2e1a",
+  "display": "standalone",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "64x64",
+      "type": "image/png"
+    }
+  ]
+}
