@@ -39,6 +39,64 @@ const BEST_KEY = "ritual-knot-best-time";
 const SWIPE_THRESHOLD = 20;
 const NODE_STEP = 16;
 
+const STATIC_MAZE_NODES: MazeNode[] = [
+  { id: "START", x: 240, y: 18, edges: ["A"] },
+  { id: "A", x: 240, y: 64, edges: ["START", "B", "D1"] },
+  { id: "B", x: 300, y: 64, edges: ["A", "C"] },
+  { id: "C", x: 300, y: 124, edges: ["B", "D", "D2"] },
+  { id: "D", x: 188, y: 124, edges: ["C", "E"] },
+  { id: "E", x: 188, y: 190, edges: ["D", "F", "D3"] },
+  { id: "F", x: 330, y: 190, edges: ["E", "G"] },
+  { id: "G", x: 330, y: 258, edges: ["F", "H", "D4"] },
+  { id: "H", x: 150, y: 258, edges: ["G", "I"] },
+  { id: "I", x: 150, y: 326, edges: ["H", "J", "D5"] },
+  { id: "J", x: 288, y: 326, edges: ["I", "K"] },
+  { id: "K", x: 288, y: 392, edges: ["J", "L", "D6"] },
+  { id: "L", x: 240, y: 392, edges: ["K", "EXIT"] },
+  { id: "EXIT", x: 240, y: 462, edges: ["L"] },
+  { id: "D1", x: 190, y: 64, edges: ["A", "D1_END"], isDeadEnd: true },
+  { id: "D1_END", x: 160, y: 100, edges: ["D1"], isDeadEnd: true },
+  { id: "D2", x: 360, y: 124, edges: ["C"], isDeadEnd: true },
+  { id: "D3", x: 130, y: 190, edges: ["E"], isDeadEnd: true },
+  { id: "D4", x: 382, y: 258, edges: ["G"], isDeadEnd: true },
+  { id: "D5", x: 92, y: 326, edges: ["I"], isDeadEnd: true },
+  { id: "D6", x: 348, y: 392, edges: ["K"], isDeadEnd: true },
+];
+
+const STATIC_SOLUTION_PATH = [
+  "START",
+  "A",
+  "B",
+  "C",
+  "D",
+  "E",
+  "F",
+  "G",
+  "H",
+  "I",
+  "J",
+  "K",
+  "L",
+  "EXIT",
+];
+
+function createStaticMazeGraph(): MazeGraph {
+  return {
+    nodes: Object.fromEntries(STATIC_MAZE_NODES.map((node) => [node.id, { ...node }])),
+    startId: "START",
+    exitId: "EXIT",
+    solutionPath: STATIC_SOLUTION_PATH,
+  };
+}
+
+function isUsableGraph(graph: MazeGraph) {
+  return (
+    graph.solutionPath.length >= 2 &&
+    Boolean(graph.nodes[graph.startId]) &&
+    Boolean(graph.nodes[graph.exitId])
+  );
+}
+
 function bfsPath(
   mask: Uint8ClampedArray,
   start: { x: number; y: number },
@@ -140,6 +198,8 @@ function sampleSolutionNodes(path: { x: number; y: number }[]) {
 
 function buildMazeGraph(mask: Uint8ClampedArray, path: { x: number; y: number }[]): MazeGraph {
   const sampled = sampleSolutionNodes(path);
+  if (sampled.length < 2) return createStaticMazeGraph();
+
   const nodes: Record<NodeId, MazeNode> = {};
   const solutionPath: NodeId[] = sampled.map((_, idx) => `N${idx}`);
 
@@ -200,12 +260,14 @@ function buildMazeGraph(mask: Uint8ClampedArray, path: { x: number; y: number }[
     if (built && branchCount >= 6) break;
   }
 
-  return {
+  const generated = {
     nodes,
     startId: solutionPath[0],
     exitId: solutionPath[solutionPath.length - 1],
     solutionPath,
   };
+
+  return isUsableGraph(generated) ? generated : createStaticMazeGraph();
 }
 
 function createHintArrows(graph: MazeGraph) {
@@ -365,7 +427,7 @@ export default function RitualMaze() {
     ctx.drawImage(img, 0, 0, SIZE, SIZE);
 
     const start = graph.nodes[graph.startId];
-    const startNext = graph.nodes[graph.solutionPath[1]];
+    const startNext = graph.nodes[graph.solutionPath[1]] ?? start;
     const sdx = startNext.x - start.x;
     const sdy = startNext.y - start.y;
     const sl = Math.hypot(sdx, sdy) || 1;
@@ -389,7 +451,7 @@ export default function RitualMaze() {
     ctx.restore();
 
     const exit = graph.nodes[graph.exitId];
-    const exitPrev = graph.nodes[graph.solutionPath[graph.solutionPath.length - 2]];
+    const exitPrev = graph.nodes[graph.solutionPath[graph.solutionPath.length - 2]] ?? exit;
     const edx = exit.x - exitPrev.x;
     const edy = exit.y - exitPrev.y;
     const el = Math.hypot(edx, edy) || 1;
@@ -460,6 +522,10 @@ export default function RitualMaze() {
       graphRef.current = graph;
       setHints(createHintArrows(graph));
       const startNode = graph.nodes[graph.startId];
+      if (!startNode) {
+        setPhase("loading");
+        return;
+      }
       playerPosRef.current = { x: startNode.x, y: startNode.y };
       setPlayerRender({ x: startNode.x, y: startNode.y });
       setCurrentNodeId(graph.startId);
