@@ -4,20 +4,23 @@ import logoUrl from "@/assets/ritual-logo.jpg";
 type Phase = "loading" | "ready" | "playing" | "done";
 type Dir = "up" | "down" | "left" | "right";
 type NodeId = string;
+type DirectionalEdges = Record<Dir, NodeId | null>;
 
 type MazeNode = {
   id: NodeId;
-  x: number;
-  y: number;
-  edges: NodeId[];
-  isDeadEnd?: boolean;
+  cx: number;
+  cy: number;
+  col: number;
+  row: number;
+  edges: DirectionalEdges;
 };
 
 type MazeGraph = {
-  nodes: Record<NodeId, MazeNode>;
-  startId: NodeId;
-  exitId: NodeId;
+  nodesMap: Map<NodeId, MazeNode>;
+  startNode: MazeNode;
+  exitNode: MazeNode;
   solutionPath: NodeId[];
+  walkable: Set<string>;
 };
 
 type HintArrow = {
@@ -34,130 +37,12 @@ type EthereumProvider = {
 };
 
 const SIZE = 480;
+const CELL = 14;
+const GRID = Math.floor(SIZE / CELL);
+const THRESHOLD = 180;
 const PLAYER_R = 6;
 const BEST_KEY = "ritual-knot-best-time";
 const SWIPE_THRESHOLD = 20;
-const NODE_STEP = 16;
-
-const STATIC_MAZE_NODES: MazeNode[] = [
-  { id: "START", x: 240, y: 18, edges: ["A"] },
-  { id: "A", x: 240, y: 64, edges: ["START", "B", "D1"] },
-  { id: "B", x: 300, y: 64, edges: ["A", "C"] },
-  { id: "C", x: 300, y: 124, edges: ["B", "D", "D2"] },
-  { id: "D", x: 188, y: 124, edges: ["C", "E"] },
-  { id: "E", x: 188, y: 190, edges: ["D", "F", "D3"] },
-  { id: "F", x: 330, y: 190, edges: ["E", "G"] },
-  { id: "G", x: 330, y: 258, edges: ["F", "H", "D4"] },
-  { id: "H", x: 150, y: 258, edges: ["G", "I"] },
-  { id: "I", x: 150, y: 326, edges: ["H", "J", "D5"] },
-  { id: "J", x: 288, y: 326, edges: ["I", "K"] },
-  { id: "K", x: 288, y: 392, edges: ["J", "L", "D6"] },
-  { id: "L", x: 240, y: 392, edges: ["K", "EXIT"] },
-  { id: "EXIT", x: 240, y: 462, edges: ["L"] },
-  { id: "D1", x: 190, y: 64, edges: ["A", "D1_END"], isDeadEnd: true },
-  { id: "D1_END", x: 160, y: 100, edges: ["D1"], isDeadEnd: true },
-  { id: "D2", x: 360, y: 124, edges: ["C"], isDeadEnd: true },
-  { id: "D3", x: 130, y: 190, edges: ["E"], isDeadEnd: true },
-  { id: "D4", x: 382, y: 258, edges: ["G"], isDeadEnd: true },
-  { id: "D5", x: 92, y: 326, edges: ["I"], isDeadEnd: true },
-  { id: "D6", x: 348, y: 392, edges: ["K"], isDeadEnd: true },
-];
-
-const STATIC_SOLUTION_PATH = [
-  "START",
-  "A",
-  "B",
-  "C",
-  "D",
-  "E",
-  "F",
-  "G",
-  "H",
-  "I",
-  "J",
-  "K",
-  "L",
-  "EXIT",
-];
-
-function createStaticMazeGraph(): MazeGraph {
-  return {
-    nodes: Object.fromEntries(STATIC_MAZE_NODES.map((node) => [node.id, { ...node }])),
-    startId: "START",
-    exitId: "EXIT",
-    solutionPath: STATIC_SOLUTION_PATH,
-  };
-}
-
-function isUsableGraph(graph: MazeGraph) {
-  return (
-    graph.solutionPath.length >= 2 &&
-    Boolean(graph.nodes[graph.startId]) &&
-    Boolean(graph.nodes[graph.exitId])
-  );
-}
-
-function bfsPath(
-  mask: Uint8ClampedArray,
-  start: { x: number; y: number },
-  finish: { x: number; y: number },
-): { x: number; y: number }[] {
-  const STEPB = 4;
-  const W = Math.floor(SIZE / STEPB);
-  const idx = (cx: number, cy: number) => cy * W + cx;
-  const walkable = (cx: number, cy: number) => {
-    const x = cx * STEPB;
-    const y = cy * STEPB;
-    if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return false;
-    return mask[y * SIZE + x] === 1;
-  };
-  const sx = Math.floor(start.x / STEPB);
-  const sy = Math.floor(start.y / STEPB);
-  const fx = Math.floor(finish.x / STEPB);
-  const fy = Math.floor(finish.y / STEPB);
-  const prev = new Int32Array(W * W).fill(-1);
-  const visited = new Uint8Array(W * W);
-  const queue: number[] = [idx(sx, sy)];
-  visited[idx(sx, sy)] = 1;
-  const dirs = [
-    [1, 0],
-    [-1, 0],
-    [0, 1],
-    [0, -1],
-  ];
-  let found = false;
-  while (queue.length) {
-    const cur = queue.shift()!;
-    const cx = cur % W;
-    const cy = Math.floor(cur / W);
-    if (cx === fx && cy === fy) {
-      found = true;
-      break;
-    }
-    for (const [dx, dy] of dirs) {
-      const nx = cx + dx;
-      const ny = cy + dy;
-      if (nx < 0 || ny < 0 || nx >= W || ny >= W) continue;
-      const ni = idx(nx, ny);
-      if (visited[ni] || !walkable(nx, ny)) continue;
-      visited[ni] = 1;
-      prev[ni] = cur;
-      queue.push(ni);
-    }
-  }
-  if (!found) return [];
-  const path: { x: number; y: number }[] = [];
-  let cur = idx(fx, fy);
-  while (cur !== -1) {
-    const cx = cur % W;
-    const cy = Math.floor(cur / W);
-    path.push({ x: cx * STEPB, y: cy * STEPB });
-    if (cx === sx && cy === sy) break;
-    cur = prev[cur];
-  }
-  path.reverse();
-  return path;
-}
 
 const fmtClock = (t: number) => {
   const m = Math.floor(t / 60)
@@ -169,105 +54,148 @@ const fmtClock = (t: number) => {
   return `${m}:${s}`;
 };
 
-function isWalkable(mask: Uint8ClampedArray, x: number, y: number) {
-  const xi = Math.round(x);
-  const yi = Math.round(y);
-  if (xi < 0 || yi < 0 || xi >= SIZE || yi >= SIZE) return false;
-  return mask[yi * SIZE + xi] === 1;
+function emptyEdges(): DirectionalEdges {
+  return { up: null, down: null, left: null, right: null };
 }
 
-function sampleSolutionNodes(path: { x: number; y: number }[]) {
-  if (path.length === 0) return [] as { x: number; y: number }[];
-  const nodes = [path[0]];
-  let acc = 0;
-  for (let i = 1; i < path.length; i++) {
-    const prev = path[i - 1];
-    const cur = path[i];
-    const d = Math.hypot(cur.x - prev.x, cur.y - prev.y);
-    acc += d;
-    if (acc >= NODE_STEP) {
-      nodes.push(cur);
-      acc = 0;
-    }
-  }
-  const last = path[path.length - 1];
-  const tail = nodes[nodes.length - 1];
-  if (!tail || Math.hypot(tail.x - last.x, tail.y - last.y) > 2) nodes.push(last);
-  return nodes;
+function edgeEntries(edges: DirectionalEdges): Array<[Dir, NodeId]> {
+  return (Object.entries(edges) as Array<[Dir, NodeId | null]>).filter(
+    (entry): entry is [Dir, NodeId] => entry[1] != null,
+  );
 }
 
-function buildMazeGraph(mask: Uint8ClampedArray, path: { x: number; y: number }[]): MazeGraph {
-  const sampled = sampleSolutionNodes(path);
-  if (sampled.length < 2) return createStaticMazeGraph();
+function isWalkablePixel(walkable: Set<string>, x: number, y: number) {
+  const px = Math.round(x);
+  const py = Math.round(y);
+  if (px < 0 || py < 0 || px >= SIZE || py >= SIZE) return false;
+  return walkable.has(`${px},${py}`);
+}
 
-  const nodes: Record<NodeId, MazeNode> = {};
-  const solutionPath: NodeId[] = sampled.map((_, idx) => `N${idx}`);
+function lineIsWalkable(walkable: Set<string>, from: MazeNode, to: MazeNode) {
+  for (let i = 0; i < 5; i++) {
+    const t = i / 4;
+    const x = from.cx + (to.cx - from.cx) * t;
+    const y = from.cy + (to.cy - from.cy) * t;
+    if (!isWalkablePixel(walkable, x, y)) return false;
+  }
+  return true;
+}
 
-  sampled.forEach((p, idx) => {
-    const id = `N${idx}`;
-    nodes[id] = { id, x: p.x, y: p.y, edges: [] };
-  });
+function bfsSolutionPath(graph: Omit<MazeGraph, "solutionPath">) {
+  const queue: NodeId[] = [graph.startNode.id];
+  const visited = new Set<NodeId>([graph.startNode.id]);
+  const prev = new Map<NodeId, NodeId>();
 
-  for (let i = 0; i < solutionPath.length - 1; i++) {
-    const a = solutionPath[i];
-    const b = solutionPath[i + 1];
-    nodes[a].edges.push(b);
-    nodes[b].edges.push(a);
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    if (id === graph.exitNode.id) break;
+    const node = graph.nodesMap.get(id);
+    if (!node) continue;
+    for (const [, nextId] of edgeEntries(node.edges)) {
+      if (visited.has(nextId)) continue;
+      visited.add(nextId);
+      prev.set(nextId, id);
+      queue.push(nextId);
+    }
   }
 
-  let branchCount = 0;
-  for (let i = 3; i < solutionPath.length - 3; i += 5) {
-    const anchorId = solutionPath[i];
-    const prev = nodes[solutionPath[i - 1]];
-    const anchor = nodes[anchorId];
-    const next = nodes[solutionPath[i + 1]];
-    const dx = next.x - prev.x;
-    const dy = next.y - prev.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const perp = [
-      { x: -dy / len, y: dx / len },
-      { x: dy / len, y: -dx / len },
-    ];
+  if (!visited.has(graph.exitNode.id)) return [];
 
-    let built = false;
-    for (const d of perp) {
-      const candidate: { x: number; y: number }[] = [];
-      for (let step = 1; step <= 3; step++) {
-        const x = anchor.x + d.x * NODE_STEP * step;
-        const y = anchor.y + d.y * NODE_STEP * step;
-        if (!isWalkable(mask, x, y)) break;
-        const tooClose = solutionPath.some((sid) => {
-          const s = nodes[sid];
-          return Math.hypot(s.x - x, s.y - y) < NODE_STEP * 0.75;
-        });
-        if (tooClose) break;
-        candidate.push({ x, y });
-      }
-      if (candidate.length >= 2) {
-        let parent = anchorId;
-        candidate.forEach((point, idx) => {
-          const id = `B${branchCount}_${idx}`;
-          nodes[id] = { id, x: point.x, y: point.y, edges: [], isDeadEnd: true };
-          nodes[parent].edges.push(id);
-          nodes[id].edges.push(parent);
-          parent = id;
-        });
-        branchCount += 1;
-        built = true;
-        break;
+  const path: NodeId[] = [];
+  let cur: NodeId | undefined = graph.exitNode.id;
+  while (cur) {
+    path.push(cur);
+    if (cur === graph.startNode.id) break;
+    cur = prev.get(cur);
+  }
+  return path.reverse();
+}
+
+function extractWalkablePixels(data: Uint8ClampedArray, threshold = THRESHOLD) {
+  const walkable = new Set<string>();
+  for (let y = 0; y < SIZE; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      const i = (y * SIZE + x) * 4;
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      if (r > threshold && g > threshold && b > threshold) {
+        walkable.add(`${x},${y}`);
       }
     }
-    if (built && branchCount >= 6) break;
+  }
+  return walkable;
+}
+
+function buildMazeGraphFromImageData(data: Uint8ClampedArray, threshold = THRESHOLD): MazeGraph {
+  const walkable = extractWalkablePixels(data, threshold);
+  const nodeGrid: Array<Array<MazeNode | null>> = Array.from({ length: GRID }, () =>
+    Array.from({ length: GRID }, () => null),
+  );
+  const nodesMap = new Map<NodeId, MazeNode>();
+
+  for (let col = 0; col < GRID; col++) {
+    for (let row = 0; row < GRID; row++) {
+      let hasWalkablePixel = false;
+      const x0 = col * CELL;
+      const y0 = row * CELL;
+      const x1 = Math.min(SIZE, x0 + CELL);
+      const y1 = Math.min(SIZE, y0 + CELL);
+      for (let y = y0; y < y1 && !hasWalkablePixel; y++) {
+        for (let x = x0; x < x1; x++) {
+          if (walkable.has(`${x},${y}`)) {
+            hasWalkablePixel = true;
+            break;
+          }
+        }
+      }
+
+      if (hasWalkablePixel) {
+        const id = `${col},${row}`;
+        const node: MazeNode = {
+          id,
+          col,
+          row,
+          cx: col * CELL + CELL / 2,
+          cy: row * CELL + CELL / 2,
+          edges: emptyEdges(),
+        };
+        nodeGrid[col][row] = node;
+        nodesMap.set(id, node);
+      }
+    }
   }
 
-  const generated = {
-    nodes,
-    startId: solutionPath[0],
-    exitId: solutionPath[solutionPath.length - 1],
-    solutionPath,
-  };
+  const neighborSpec: Array<[Dir, number, number]> = [
+    ["up", 0, -1],
+    ["down", 0, 1],
+    ["left", -1, 0],
+    ["right", 1, 0],
+  ];
 
-  return isUsableGraph(generated) ? generated : createStaticMazeGraph();
+  for (const node of nodesMap.values()) {
+    for (const [direction, dc, dr] of neighborSpec) {
+      const neighbor = nodeGrid[node.col + dc]?.[node.row + dr];
+      if (neighbor && lineIsWalkable(walkable, node, neighbor)) {
+        node.edges[direction] = neighbor.id;
+      }
+    }
+  }
+
+  const nodes = Array.from(nodesMap.values());
+  if (nodes.length === 0) {
+    throw new Error("No walkable knot pixels were found.");
+  }
+
+  const startNode = nodes.reduce((top, node) => (node.cy < top.cy ? node : top), nodes[0]);
+  const exitNode = nodes.reduce((bottom, node) => (node.cy > bottom.cy ? node : bottom), nodes[0]);
+  const graphBase = { nodesMap, startNode, exitNode, walkable };
+  const solutionPath = bfsSolutionPath(graphBase);
+  if (solutionPath.length < 2) {
+    throw new Error("The extracted knot graph has no route from start to exit.");
+  }
+
+  return { ...graphBase, solutionPath };
 }
 
 function createHintArrows(graph: MazeGraph) {
@@ -275,21 +203,36 @@ function createHintArrows(graph: MazeGraph) {
   for (let i = 0; i < graph.solutionPath.length - 1; i++) {
     const fromId = graph.solutionPath[i];
     const toId = graph.solutionPath[i + 1];
-    const from = graph.nodes[fromId];
-    const to = graph.nodes[toId];
+    const from = graph.nodesMap.get(fromId);
+    const to = graph.nodesMap.get(toId);
     if (!from || !to) continue;
-    if (from.edges.length <= 1) continue;
-    const angle = (Math.atan2(to.y - from.y, to.x - from.x) * 180) / Math.PI;
-    arrows.push({ id: `${fromId}->${toId}`, fromId, toId, x: from.x, y: from.y, angle });
+    const direction = edgeEntries(from.edges).find(([, edgeId]) => edgeId === toId)?.[0];
+    if (!direction) continue;
+    const angle = (Math.atan2(to.cy - from.cy, to.cx - from.cx) * 180) / Math.PI;
+    arrows.push({ id: `${fromId}->${toId}`, fromId, toId, x: from.cx, y: from.cy, angle });
   }
   return arrows;
 }
 
-function directionVector(dir: Dir) {
-  if (dir === "up") return { x: 0, y: -1 };
-  if (dir === "down") return { x: 0, y: 1 };
-  if (dir === "left") return { x: -1, y: 0 };
-  return { x: 1, y: 0 };
+function buildGraphFromImage(img: HTMLImageElement) {
+  const off = document.createElement("canvas");
+  off.width = SIZE;
+  off.height = SIZE;
+  const ctx = off.getContext("2d");
+  if (!ctx) {
+    throw new Error("Unable to access canvas context for knot extraction.");
+  }
+  ctx.drawImage(img, 0, 0, SIZE, SIZE);
+  const data = ctx.getImageData(0, 0, SIZE, SIZE).data;
+  let lastError: unknown = null;
+  for (const threshold of [THRESHOLD, 170, 160, 150, 140]) {
+    try {
+      return buildMazeGraphFromImageData(data, threshold);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Unable to build knot graph.");
 }
 
 function getLocalStorageItem(key: string) {
@@ -320,8 +263,8 @@ function removeLocalStorageItem(key: string) {
 
 export default function RitualMaze() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const debugCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const gameRef = useRef<HTMLDivElement | null>(null);
-  const maskRef = useRef<Uint8ClampedArray | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const graphRef = useRef<MazeGraph | null>(null);
   const playerPosRef = useRef({ x: 0, y: 0 });
@@ -339,6 +282,7 @@ export default function RitualMaze() {
   const [playerRender, setPlayerRender] = useState({ x: 0, y: 0 });
   const [hints, setHints] = useState<HintArrow[]>([]);
   const [hintsEnabled, setHintsEnabled] = useState(false);
+  const [debug, setDebug] = useState(false);
   const [hoveredHintId, setHoveredHintId] = useState<string | null>(null);
   const [invalidPulse, setInvalidPulse] = useState(0);
 
@@ -426,15 +370,15 @@ export default function RitualMaze() {
     ctx.fillRect(0, 0, SIZE, SIZE);
     ctx.drawImage(img, 0, 0, SIZE, SIZE);
 
-    const start = graph.nodes[graph.startId];
-    const startNext = graph.nodes[graph.solutionPath[1]] ?? start;
-    const sdx = startNext.x - start.x;
-    const sdy = startNext.y - start.y;
+    const start = graph.startNode;
+    const startNext = graph.nodesMap.get(graph.solutionPath[1]) ?? start;
+    const sdx = startNext.cx - start.cx;
+    const sdy = startNext.cy - start.cy;
     const sl = Math.hypot(sdx, sdy) || 1;
     drawArrow(
       ctx,
-      start.x - (sdx / sl) * 18,
-      start.y - (sdy / sl) * 18,
+      start.cx - (sdx / sl) * 18,
+      start.cy - (sdy / sl) * 18,
       Math.atan2(-sdy, -sdx),
       13,
       "#4ade80",
@@ -446,19 +390,19 @@ export default function RitualMaze() {
     ctx.strokeStyle = "#4ade80";
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(start.x, start.y, 10, 0, Math.PI * 2);
+    ctx.arc(start.cx, start.cy, 10, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
 
-    const exit = graph.nodes[graph.exitId];
-    const exitPrev = graph.nodes[graph.solutionPath[graph.solutionPath.length - 2]] ?? exit;
-    const edx = exit.x - exitPrev.x;
-    const edy = exit.y - exitPrev.y;
+    const exit = graph.exitNode;
+    const exitPrev = graph.nodesMap.get(graph.solutionPath[graph.solutionPath.length - 2]) ?? exit;
+    const edx = exit.cx - exitPrev.cx;
+    const edy = exit.cy - exitPrev.cy;
     const el = Math.hypot(edx, edy) || 1;
     drawArrow(
       ctx,
-      exit.x + (edx / el) * 18,
-      exit.y + (edy / el) * 18,
+      exit.cx + (edx / el) * 18,
+      exit.cy + (edy / el) * 18,
       Math.atan2(edy, edx),
       13,
       "#f5d68a",
@@ -470,10 +414,82 @@ export default function RitualMaze() {
     ctx.strokeStyle = "#f5d68a";
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(exit.x, exit.y, 10, 0, Math.PI * 2);
+    ctx.arc(exit.cx, exit.cy, 10, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
   }, []);
+
+  const drawDebugOverlay = useCallback(() => {
+    const canvas = debugCanvasRef.current;
+    const graph = graphRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d")!;
+    ctx.clearRect(0, 0, SIZE, SIZE);
+    if (!debug || !graph) return;
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(74,222,128,0.38)";
+    ctx.lineWidth = 1;
+    const drawn = new Set<string>();
+    for (const node of graph.nodesMap.values()) {
+      for (const [, nextId] of edgeEntries(node.edges)) {
+        const key = [node.id, nextId].sort().join("|");
+        if (drawn.has(key)) continue;
+        const next = graph.nodesMap.get(nextId);
+        if (!next) continue;
+        drawn.add(key);
+        ctx.beginPath();
+        ctx.moveTo(node.cx, node.cy);
+        ctx.lineTo(next.cx, next.cy);
+        ctx.stroke();
+      }
+    }
+
+    ctx.fillStyle = "rgba(74,222,128,0.45)";
+    for (const node of graph.nodesMap.values()) {
+      ctx.beginPath();
+      ctx.arc(node.cx, node.cy, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = "#4ade80";
+    ctx.beginPath();
+    ctx.arc(graph.startNode.cx, graph.startNode.cy, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#f5d68a";
+    ctx.beginPath();
+    ctx.arc(graph.exitNode.cx, graph.exitNode.cy, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    const current = currentNodeId ? graph.nodesMap.get(currentNodeId) : null;
+    if (current) {
+      ctx.fillStyle = "#fde047";
+      ctx.beginPath();
+      ctx.arc(current.cx, current.cy, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }, [currentNodeId, debug]);
+
+  const initializeGraph = useCallback(() => {
+    const img = imgRef.current;
+    if (!img || !img.complete || img.naturalWidth === 0) return false;
+    const graph = buildGraphFromImage(img);
+    graphRef.current = graph;
+    setHints(createHintArrows(graph));
+    playerPosRef.current = { x: graph.startNode.cx, y: graph.startNode.cy };
+    setPlayerRender({ x: graph.startNode.cx, y: graph.startNode.cy });
+    setCurrentNodeId(graph.startNode.id);
+    setMoves(0);
+    setElapsed(0);
+    setFinalTime(0);
+    setMintState("idle");
+    setTxHash(null);
+    setPhase("ready");
+    draw();
+    return true;
+  }, [draw]);
 
   useEffect(() => {
     const img = new Image();
@@ -481,76 +497,27 @@ export default function RitualMaze() {
     img.src = logoUrl;
     img.onload = () => {
       imgRef.current = img;
-      const off = document.createElement("canvas");
-      off.width = SIZE;
-      off.height = SIZE;
-      const ctx = off.getContext("2d")!;
-      ctx.fillStyle = "#06160f";
-      ctx.fillRect(0, 0, SIZE, SIZE);
-      ctx.drawImage(img, 0, 0, SIZE, SIZE);
-      const data = ctx.getImageData(0, 0, SIZE, SIZE).data;
-      const mask = new Uint8ClampedArray(SIZE * SIZE);
-      for (let i = 0; i < SIZE * SIZE; i++) {
-        const r = data[i * 4];
-        const g = data[i * 4 + 1];
-        const b = data[i * 4 + 2];
-        mask[i] = r > 200 && g > 200 && b > 200 ? 1 : 0;
-      }
-      maskRef.current = mask;
-
-      let start = { x: 0, y: 0 };
-      outer1: for (let y = 0; y < SIZE; y++) {
-        for (let x = 0; x < SIZE; x++) {
-          if (mask[y * SIZE + x]) {
-            start = { x, y };
-            break outer1;
-          }
-        }
-      }
-      let finish = { x: 0, y: 0 };
-      outer2: for (let y = SIZE - 1; y >= 0; y--) {
-        for (let x = 0; x < SIZE; x++) {
-          if (mask[y * SIZE + x]) {
-            finish = { x, y };
-            break outer2;
-          }
-        }
-      }
-
-      const path = bfsPath(mask, start, finish);
-      const graph = buildMazeGraph(mask, path);
-      graphRef.current = graph;
-      setHints(createHintArrows(graph));
-      const startNode = graph.nodes[graph.startId];
-      if (!startNode) {
-        setPhase("loading");
-        return;
-      }
-      playerPosRef.current = { x: startNode.x, y: startNode.y };
-      setPlayerRender({ x: startNode.x, y: startNode.y });
-      setCurrentNodeId(graph.startId);
-      setPhase("ready");
-      draw();
+      initializeGraph();
     };
-  }, [draw]);
+    return () => {
+      img.onload = null;
+    };
+  }, [initializeGraph]);
 
   const start = useCallback(() => {
     const graph = graphRef.current;
     if (!graph) return;
-    const startNode = graph.nodes[graph.startId];
-    playerPosRef.current = { x: startNode.x, y: startNode.y };
-    setPlayerRender({ x: startNode.x, y: startNode.y });
-    setCurrentNodeId(graph.startId);
+    playerPosRef.current = { x: graph.startNode.cx, y: graph.startNode.cy };
+    setPlayerRender({ x: graph.startNode.cx, y: graph.startNode.cy });
+    setCurrentNodeId(graph.startNode.id);
     setMoves(0);
     setElapsed(0);
     setFinalTime(0);
     setMintState("idle");
     setTxHash(null);
     if (timerRef.current) window.clearInterval(timerRef.current);
-    startTimeRef.current = performance.now();
-    timerRef.current = window.setInterval(() => {
-      setElapsed((performance.now() - startTimeRef.current) / 1000);
-    }, 100);
+    timerRef.current = null;
+    startTimeRef.current = 0;
     setPhase("playing");
     draw();
     gameRef.current?.focus();
@@ -563,8 +530,9 @@ export default function RitualMaze() {
     }
     isAnimatingRef.current = false;
     setHoveredHintId(null);
-    start();
-  }, [start]);
+    initializeGraph();
+    gameRef.current?.focus();
+  }, [initializeGraph]);
 
   useEffect(() => {
     return () => {
@@ -588,42 +556,25 @@ export default function RitualMaze() {
   }, []);
 
   const animateToNode = useCallback(
-    (toId: NodeId) => {
+    (toId: NodeId, fromIdOverride?: NodeId) => {
       const graph = graphRef.current;
-      const fromId = currentNodeId;
+      const fromId = fromIdOverride ?? currentNodeId;
       if (!graph || !fromId) return;
-      const from = graph.nodes[fromId];
-      const to = graph.nodes[toId];
-      if (!from || !to) return;
+      const to = graph.nodesMap.get(toId);
+      if (!graph.nodesMap.has(fromId) || !to) return;
       isAnimatingRef.current = true;
-      const startMs = performance.now();
-      const duration = 180;
-
-      const step = (ts: number) => {
-        const t = Math.min(1, (ts - startMs) / duration);
-        const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-        playerPosRef.current = {
-          x: from.x + (to.x - from.x) * eased,
-          y: from.y + (to.y - from.y) * eased,
-        };
-        setPlayerRender(playerPosRef.current);
-        draw();
-        if (t < 1) {
-          requestAnimationFrame(step);
-          return;
-        }
-
-        playerPosRef.current = { x: to.x, y: to.y };
-        setPlayerRender({ x: to.x, y: to.y });
-        setCurrentNodeId(toId);
-        setMoves((m) => m + 1);
+      playerPosRef.current = { x: to.cx, y: to.cy };
+      setPlayerRender({ x: to.cx, y: to.cy });
+      setCurrentNodeId(toId);
+      setMoves((m) => m + 1);
+      draw();
+      drawDebugOverlay();
+      if (toId === graph.exitNode.id) finishRun();
+      window.setTimeout(() => {
         isAnimatingRef.current = false;
-        if (toId === graph.exitId) finishRun();
-      };
-
-      requestAnimationFrame(step);
+      }, 120);
     },
-    [currentNodeId, draw, finishRun],
+    [currentNodeId, draw, drawDebugOverlay, finishRun],
   );
 
   const invalidMoveFeedback = useCallback(() => {
@@ -634,33 +585,26 @@ export default function RitualMaze() {
     (dir: Dir) => {
       if (phase === "ready") {
         start();
-        return;
       }
-      if (phase !== "playing" || isAnimatingRef.current) return;
+      if (!["ready", "playing"].includes(phase) || isAnimatingRef.current) return;
       const graph = graphRef.current;
-      if (!graph || !currentNodeId) return;
-      const cur = graph.nodes[currentNodeId];
-      const vec = directionVector(dir);
-
-      let bestId: NodeId | null = null;
-      let bestDot = 0.45;
-      for (const edgeId of cur.edges) {
-        const n = graph.nodes[edgeId];
-        const dx = n.x - cur.x;
-        const dy = n.y - cur.y;
-        const len = Math.hypot(dx, dy) || 1;
-        const dot = (dx / len) * vec.x + (dy / len) * vec.y;
-        if (dot > bestDot) {
-          bestDot = dot;
-          bestId = edgeId;
+      if (!graph) return;
+      const activeNodeId = phase === "ready" ? graph.startNode.id : currentNodeId;
+      if (!activeNodeId) return;
+      const node = graph.nodesMap.get(activeNodeId);
+      if (!node) return;
+      const nextId = node.edges[dir];
+      if (nextId !== null && nextId !== undefined) {
+        if (timerRef.current == null) {
+          startTimeRef.current = performance.now();
+          timerRef.current = window.setInterval(() => {
+            setElapsed((performance.now() - startTimeRef.current) / 1000);
+          }, 100);
         }
-      }
-
-      if (!bestId) {
+        animateToNode(nextId, activeNodeId);
+      } else {
         invalidMoveFeedback();
-        return;
       }
-      animateToNode(bestId);
     },
     [animateToNode, currentNodeId, invalidMoveFeedback, phase, start],
   );
@@ -687,6 +631,11 @@ export default function RitualMaze() {
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "`") {
+      e.preventDefault();
+      setDebug((v) => !v);
+      return;
+    }
     const key = e.key.toLowerCase();
     const map: Record<string, Dir> = {
       arrowup: "up",
@@ -703,6 +652,10 @@ export default function RitualMaze() {
     e.preventDefault();
     tryMove(dir);
   };
+
+  useEffect(() => {
+    drawDebugOverlay();
+  }, [drawDebugOverlay, debug, currentNodeId]);
 
   useEffect(() => {
     draw();
@@ -827,8 +780,15 @@ export default function RitualMaze() {
                 pointerStartRef.current = null;
               }}
             />
+            <canvas
+              ref={debugCanvasRef}
+              width={SIZE}
+              height={SIZE}
+              className="absolute inset-0 z-[2] w-full h-full pointer-events-none rounded-2xl"
+              aria-hidden="true"
+            />
             <svg
-              className={`absolute inset-0 w-full h-full rounded-2xl transition-opacity duration-200 ${
+              className={`absolute inset-0 z-[3] w-full h-full rounded-2xl transition-opacity duration-200 ${
                 hintsEnabled ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
               }`}
               viewBox={`0 0 ${SIZE} ${SIZE}`}
@@ -862,7 +822,7 @@ export default function RitualMaze() {
             </svg>
             <div
               key={invalidPulse}
-              className={`absolute z-10 rounded-full border border-[#fff4c2] bg-[var(--ritual-gold)] shadow-[0_0_18px_rgba(245,214,138,0.85)] ${
+              className={`absolute z-10 rounded-full border border-[#fff4c2] bg-[var(--ritual-gold)] shadow-[0_0_18px_rgba(245,214,138,0.85)] transition-[left,top,transform] duration-[120ms] ease-out ${
                 invalidPulse ? "token-invalid" : ""
               }`}
               style={{
@@ -1066,12 +1026,14 @@ export default function RitualMaze() {
           border-color: rgba(74,222,128,0.55);
         }
         .token-invalid {
-          animation: token-shake .24s ease, token-flash .24s ease;
+          animation: token-shake 300ms ease, token-flash 300ms ease;
         }
         @keyframes token-shake {
-          0%, 100% { margin-left: 0; }
-          25% { margin-left: -5px; }
-          75% { margin-left: 5px; }
+          0%, 100% { transform: translate(-50%, -50%); }
+          20% { transform: translate(calc(-50% - 4px), -50%); }
+          40% { transform: translate(calc(-50% + 4px), -50%); }
+          60% { transform: translate(calc(-50% - 3px), -50%); }
+          80% { transform: translate(calc(-50% + 3px), -50%); }
         }
         @keyframes token-flash {
           0%, 100% { box-shadow: 0 0 18px rgba(245,214,138,0.85); }
