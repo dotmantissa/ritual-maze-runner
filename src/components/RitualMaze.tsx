@@ -119,6 +119,11 @@ function extractErrorMessage(error: unknown) {
   return "Mint transaction failed. Please try again.";
 }
 
+function toUint(value: number) {
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return Math.trunc(value);
+}
+
 function emptyEdges(): DirectionalEdges {
   return {
     up: null,
@@ -885,7 +890,7 @@ export default function RitualMaze() {
     const provider = new ethers.BrowserProvider(getEthereumProvider());
     const signer = await provider.getSigner();
     const contract = new ethers.Contract(RITUAL_NFT_CONTRACT_ADDRESS, RITUAL_NFT_ABI, signer);
-    const tx = await contract.mint(account, score, time, moves);
+    const tx = await contract.mint(account, toUint(score), toUint(time), toUint(moves));
     setMintState("pending");
     setTxHash(tx.hash);
     return tx.wait();
@@ -896,7 +901,7 @@ export default function RitualMaze() {
     setMintError(null);
     setTxHash(null);
     try {
-      const receipt = await mintScoreNFT({ score, time: finalTime, moves });
+      const receipt = await mintScoreNFT({ score, time: Math.ceil(finalTime), moves });
       if (receipt?.hash) setTxHash(receipt.hash);
       setMintState("minted");
     } catch (e) {
