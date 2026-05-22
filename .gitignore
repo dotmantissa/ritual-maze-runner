@@ -31,3 +31,7 @@ dist-ssr
 *.sln
 *.sw?
 .vercel
+
+# Foundry
+contracts/out/
+contracts/cache/

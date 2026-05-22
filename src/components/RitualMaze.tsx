@@ -1,3 +1,4 @@
+import { ethers } from "ethers";
 import { useEffect, useRef, useState, useCallback } from "react";
 import logoUrl from "@/assets/ritual-logo.jpg";
 
@@ -33,8 +34,10 @@ type HintArrow = {
 };
 
 type EthereumProvider = {
-  request: (args: { method: "eth_requestAccounts" }) => Promise<string[]>;
+  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
 };
+
+type MintState = "idle" | "checking-network" | "approving" | "pending" | "minted" | "error";
 
 const SIZE = 480;
 const CELL = 10;
@@ -43,6 +46,18 @@ const MIN_COMPONENT_SIZE = 30;
 const PLAYER_R = 6;
 const BEST_KEY = "ritual-knot-best-time";
 const SWIPE_THRESHOLD = 20;
+const RITUAL_EXPLORER_URL = "https://explorer.ritualfoundation.org";
+const RITUAL_TESTNET = {
+  chainId: "0x7bb",
+  chainName: "Ritual Testnet",
+  rpcUrls: ["https://rpc.ritualfoundation.org"],
+  nativeCurrency: { name: "RITUAL", symbol: "RITUAL", decimals: 18 },
+  blockExplorerUrls: [RITUAL_EXPLORER_URL],
+};
+const RITUAL_NFT_CONTRACT_ADDRESS = import.meta.env.VITE_RITUAL_SCORE_NFT_CONTRACT?.trim() ?? "";
+const RITUAL_NFT_ABI = [
+  "function mint(address to, uint256 score, uint256 time, uint256 moves) returns (uint256 tokenId)",
+] as const;
 
 const DIRECTIONS: Array<{ name: Dir; dc: number; dr: number }> = [
   { name: "up", dc: 0, dr: -1 },
@@ -88,6 +103,21 @@ const fmtClock = (t: number) => {
     .padStart(2, "0");
   return `${m}:${s}`;
 };
+
+function getEthereumProvider() {
+  const provider = (window as Window & { ethereum?: EthereumProvider }).ethereum;
+  if (!provider?.request) throw new Error("No wallet detected. Please install MetaMask.");
+  return provider;
+}
+
+function extractErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message) return message;
+  }
+  return "Mint transaction failed. Please try again.";
+}
 
 function emptyEdges(): DirectionalEdges {
   return {
@@ -433,36 +463,23 @@ export default function RitualMaze() {
   const [invalidPulse, setInvalidPulse] = useState(0);
 
   const [wallet, setWallet] = useState<string | null>(null);
-  const [mintState, setMintState] = useState<"idle" | "minting" | "minted">("idle");
+  const [mintState, setMintState] = useState<MintState>("idle");
+  const [mintError, setMintError] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
 
   const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
   const connectWallet = async () => {
     try {
-      const eth = (window as Window & { ethereum?: EthereumProvider }).ethereum;
-      if (eth?.request) {
-        const accounts: string[] = await eth.request({ method: "eth_requestAccounts" });
-        if (accounts?.[0]) {
-          setWallet(accounts[0]);
-          setLocalStorageItem("ritual-wallet", accounts[0]);
-          return;
-        }
-      }
-      const sim =
-        "0xR1" +
-        Math.random().toString(16).slice(2, 10).padEnd(8, "0") +
-        "Ritual" +
-        Math.random().toString(16).slice(2, 6);
-      const addr =
-        "0x" +
-        sim
-          .replace(/[^0-9a-fA-F]/g, "")
-          .slice(0, 40)
-          .padEnd(40, "0");
-      setWallet(addr);
-      setLocalStorageItem("ritual-wallet", addr);
+      setMintError(null);
+      const accounts = (await getEthereumProvider().request({
+        method: "eth_requestAccounts",
+      })) as string[];
+      if (!accounts?.[0]) throw new Error("No account connected.");
+      setWallet(accounts[0]);
+      setLocalStorageItem("ritual-wallet", accounts[0]);
     } catch (e) {
+      setMintError(extractErrorMessage(e));
       console.warn("Wallet connect failed", e);
     }
   };
@@ -631,6 +648,7 @@ export default function RitualMaze() {
     setElapsed(0);
     setFinalTime(0);
     setMintState("idle");
+    setMintError(null);
     setTxHash(null);
     setPhase("ready");
     draw();
@@ -660,6 +678,7 @@ export default function RitualMaze() {
     setElapsed(0);
     setFinalTime(0);
     setMintState("idle");
+    setMintError(null);
     setTxHash(null);
     if (timerRef.current) window.clearInterval(timerRef.current);
     timerRef.current = null;
@@ -797,27 +816,105 @@ export default function RitualMaze() {
     draw();
   }, [draw, currentNodeId, phase]);
 
+  const enforceRitualTestnet = async () => {
+    const provider = getEthereumProvider();
+    setMintState("checking-network");
+    const currentChainId = await provider.request({ method: "eth_chainId" });
+
+    if (currentChainId !== RITUAL_TESTNET.chainId) {
+      try {
+        await provider.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: RITUAL_TESTNET.chainId }],
+        });
+      } catch (switchError) {
+        if (typeof switchError === "object" && switchError && "code" in switchError) {
+          const code = (switchError as { code?: unknown }).code;
+          if (code === 4902) {
+            await provider.request({
+              method: "wallet_addEthereumChain",
+              params: [RITUAL_TESTNET],
+            });
+          } else {
+            throw switchError;
+          }
+        } else {
+          throw switchError;
+        }
+      }
+    }
+
+    const confirmedChain = await provider.request({ method: "eth_chainId" });
+    if (confirmedChain !== RITUAL_TESTNET.chainId) {
+      throw new Error("User rejected network switch. Must be on Ritual Testnet to mint.");
+    }
+  };
+
+  const getConnectedAccount = async () => {
+    setMintState("approving");
+    const accounts = (await getEthereumProvider().request({
+      method: "eth_requestAccounts",
+    })) as string[];
+    if (!accounts?.[0]) throw new Error("No account connected.");
+    setWallet(accounts[0]);
+    setLocalStorageItem("ritual-wallet", accounts[0]);
+    return accounts[0];
+  };
+
+  const mintScoreNFT = async ({
+    score,
+    time,
+    moves,
+  }: {
+    score: number;
+    time: number;
+    moves: number;
+  }) => {
+    await enforceRitualTestnet();
+    const account = await getConnectedAccount();
+
+    if (!RITUAL_NFT_CONTRACT_ADDRESS) {
+      throw new Error(
+        "Missing VITE_RITUAL_SCORE_NFT_CONTRACT. Deploy/configure the Ritual Testnet score NFT contract before minting.",
+      );
+    }
+    if (!ethers.isAddress(RITUAL_NFT_CONTRACT_ADDRESS)) {
+      throw new Error("Configured Ritual score NFT contract address is invalid.");
+    }
+
+    const provider = new ethers.BrowserProvider(getEthereumProvider());
+    const signer = await provider.getSigner();
+    const contract = new ethers.Contract(RITUAL_NFT_CONTRACT_ADDRESS, RITUAL_NFT_ABI, signer);
+    const tx = await contract.mint(account, score, time, moves);
+    setMintState("pending");
+    setTxHash(tx.hash);
+    return tx.wait();
+  };
+
   const mintNft = async () => {
-    if (!wallet || mintState === "minting") return;
-    setMintState("minting");
-    const payload = {
-      score,
-      time: finalTime,
-      moves,
-      completed: true,
-      timestamp: Date.now(),
-      wallet,
-      chain: "Ritual",
-    };
-    await new Promise((r) => setTimeout(r, 1600));
-    const hash =
-      "0x" + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
-    setTxHash(hash);
-    setMintState("minted");
-    console.log("Ritual NFT minted (simulated)", { hash, payload });
+    if (["checking-network", "approving", "pending"].includes(mintState)) return;
+    setMintError(null);
+    setTxHash(null);
+    try {
+      const receipt = await mintScoreNFT({ score, time: finalTime, moves });
+      if (receipt?.hash) setTxHash(receipt.hash);
+      setMintState("minted");
+    } catch (e) {
+      setMintError(extractErrorMessage(e));
+      setMintState("error");
+    }
   };
 
   const score = Math.max(0, Math.round(10000 - finalTime * 50 - moves * 2));
+  const mintBusy = ["checking-network", "approving", "pending"].includes(mintState);
+  const mintButtonLabel =
+    mintState === "checking-network"
+      ? "Checking network..."
+      : mintState === "approving"
+        ? "Approve in wallet..."
+        : mintState === "pending"
+          ? "Minting..."
+          : "Mint Score NFT on Ritual";
   const liveTime = phase === "done" ? finalTime : elapsed;
   const liveScore =
     phase === "ready" ? 0 : Math.max(0, Math.round(10000 - liveTime * 50 - moves * 2));
@@ -1006,30 +1103,38 @@ export default function RitualMaze() {
                   <button onClick={restart} className="ritual-btn">
                     Play Again
                   </button>
-                  {!wallet ? (
-                    <button
-                      onClick={connectWallet}
-                      className="ritual-btn-ghost flex items-center justify-center gap-2"
-                    >
-                      <WalletIcon /> Connect Wallet to Mint NFT
-                    </button>
-                  ) : mintState === "minted" ? (
+                  {mintState === "minted" ? (
                     <div className="text-center">
                       <div className="text-xs uppercase tracking-[0.25em] text-[var(--ritual-glow)]">
-                        NFT Minted on Ritual
+                        Minted! View on Explorer →
                       </div>
-                      <div className="font-mono text-[10px] text-[var(--ritual-cream)]/60 mt-1 break-all">
-                        {txHash?.slice(0, 18)}…{txHash?.slice(-8)}
-                      </div>
+                      {txHash && (
+                        <a
+                          href={`${RITUAL_EXPLORER_URL}/tx/${txHash}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-mono text-[10px] text-[var(--ritual-cream)]/70 mt-1 break-all hover:text-[var(--ritual-gold)]"
+                        >
+                          {txHash.slice(0, 18)}…{txHash.slice(-8)}
+                        </a>
+                      )}
                     </div>
                   ) : (
                     <button
                       onClick={mintNft}
-                      disabled={mintState === "minting"}
+                      disabled={mintBusy}
                       className="ritual-btn flex items-center justify-center gap-2"
                     >
-                      {mintState === "minting" ? "Minting on Ritual…" : "Mint Score NFT on Ritual"}
+                      {mintState === "pending" && (
+                        <span className="h-3 w-3 rounded-full border border-current border-t-transparent animate-spin" />
+                      )}
+                      {mintButtonLabel}
                     </button>
+                  )}
+                  {mintError && (
+                    <div className="text-xs text-red-300/90 text-center leading-snug">
+                      {mintError}
+                    </div>
                   )}
                 </div>
               </Overlay>
