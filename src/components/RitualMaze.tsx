@@ -54,6 +54,19 @@ const DIRECTIONS: Array<{ name: Dir; dc: number; dr: number }> = [
   { name: "down-right", dc: 1, dr: 1 },
 ];
 
+const REVERSE_DIR: Record<Dir, Dir> = {
+  up: "down",
+  down: "up",
+  left: "right",
+  right: "left",
+  "up-left": "down-right",
+  "down-right": "up-left",
+  "up-right": "down-left",
+  "down-left": "up-right",
+};
+
+const GAP_BRIDGE_DISTANCE = 3;
+
 const INPUT_MAP: Record<string, Dir[]> = {
   arrowup: ["up", "up-left", "up-right"],
   w: ["up", "up-left", "up-right"],
@@ -122,6 +135,24 @@ function bfsSolutionPath(graph: Omit<MazeGraph, "solutionPath">) {
     cur = prev.get(cur);
   }
   return path.reverse();
+}
+
+function logReachability(nodesMap: Map<NodeId, MazeNode>, startNode: MazeNode, exitNode: MazeNode) {
+  const visited = new Set<NodeId>();
+  const queue: NodeId[] = [startNode.id];
+  while (queue.length > 0) {
+    const id = queue.shift();
+    if (!id || visited.has(id)) continue;
+    visited.add(id);
+    const node = nodesMap.get(id);
+    if (!node) continue;
+    Object.values(node.edges).forEach((edgeId) => {
+      if (edgeId) queue.push(edgeId);
+    });
+  }
+  console.log("Reachable nodes:", visited.size, "/", nodesMap.size);
+  console.log("EXIT reachable:", visited.has(exitNode.id));
+  return visited;
 }
 
 function extractWalkablePixels(data: Uint8ClampedArray) {
@@ -220,30 +251,55 @@ function buildMazeGraphFromImageData(data: Uint8ClampedArray): MazeGraph {
     throw new Error("No walkable knot pixels were found.");
   }
 
-  const startNode = nodes.reduce((top, node) => (node.cy < top.cy ? node : top), nodes[0]);
-  const exitNode = nodes.reduce((bottom, node) => (node.cy > bottom.cy ? node : bottom), nodes[0]);
+  for (const [key, node] of nodesMap) {
+    for (const { name: direction, dc, dr } of DIRECTIONS) {
+      if (node.edges[direction]) continue;
+
+      for (let step = 2; step <= GAP_BRIDGE_DISTANCE; step++) {
+        const neighborKey = `${node.col + dc * step},${node.row + dr * step}`;
+        const neighbor = nodesMap.get(neighborKey);
+        if (!neighbor) continue;
+        node.edges[direction] = neighborKey;
+        const reverseDirection = REVERSE_DIR[direction];
+        if (!neighbor.edges[reverseDirection]) {
+          neighbor.edges[reverseDirection] = key;
+        }
+        break;
+      }
+    }
+  }
+
+  let startNode: MazeNode | null = null;
+  let exitNode: MazeNode | null = null;
+  let minCy = Infinity;
+  let maxCy = -Infinity;
+
+  for (const node of nodesMap.values()) {
+    if (node.cy < minCy) {
+      minCy = node.cy;
+      startNode = node;
+    }
+    if (node.cy > maxCy) {
+      maxCy = node.cy;
+      exitNode = node;
+    }
+  }
+
+  if (!startNode || !exitNode) {
+    throw new Error("No sampled knot nodes were found.");
+  }
+
+  console.log("START cy:", startNode.cy, "| EXIT cy:", exitNode.cy);
+  console.log("Canvas height:", SIZE, "- EXIT should be close to", SIZE);
   console.log("START:", startNode);
   console.log("EXIT:", exitNode);
+  logReachability(nodesMap, startNode, exitNode);
   const graphBase = { nodesMap, startNode, exitNode, walkable: component };
   const solutionPath = bfsSolutionPath(graphBase);
   if (solutionPath.length < 2) {
-    const visited = new Set<NodeId>();
-    const queue: NodeId[] = [startNode.id];
-    while (queue.length > 0) {
-      const id = queue.shift();
-      if (!id || visited.has(id)) continue;
-      visited.add(id);
-      const node = nodesMap.get(id);
-      if (!node) continue;
-      Object.values(node.edges).forEach((edgeId) => {
-        if (edgeId != null) queue.push(edgeId);
-      });
-    }
     console.log("Total nodes:", nodesMap.size);
     console.log("START node:", startNode);
     console.log("EXIT node:", exitNode);
-    console.log("Nodes reachable from START:", visited.size);
-    console.log("EXIT reachable:", visited.has(exitNode.id));
     throw new Error("The extracted knot graph has no route from start to exit.");
   }
 
