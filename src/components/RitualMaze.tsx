@@ -37,8 +37,10 @@ type EthereumProvider = {
 };
 
 const SIZE = 480;
-const CELL = 14;
-const THRESHOLD = 150;
+const CELL = 10;
+const INITIAL_THRESHOLD = 130;
+const MIN_THRESHOLD = 80;
+const COMPONENT_TARGET_SIZE = 5000;
 const PLAYER_R = 6;
 const BEST_KEY = "ritual-knot-best-time";
 const SWIPE_THRESHOLD = 20;
@@ -155,7 +157,7 @@ function logReachability(nodesMap: Map<NodeId, MazeNode>, startNode: MazeNode, e
   return visited;
 }
 
-function extractWalkablePixels(data: Uint8ClampedArray) {
+function extractWalkablePixels(data: Uint8ClampedArray, threshold: number) {
   const walkable = new Set<number>();
   for (let y = 0; y < SIZE; y++) {
     for (let x = 0; x < SIZE; x++) {
@@ -163,7 +165,7 @@ function extractWalkablePixels(data: Uint8ClampedArray) {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
-      if (r > THRESHOLD && g > THRESHOLD && b > THRESHOLD) {
+      if (r > threshold && g > threshold && b > threshold) {
         walkable.add(y * SIZE + x);
       }
     }
@@ -171,27 +173,13 @@ function extractWalkablePixels(data: Uint8ClampedArray) {
   return walkable;
 }
 
-function floodConnectedComponent(walkable: Set<number>) {
-  let seedIndex = -1;
-  for (let y = 0; y < SIZE && seedIndex === -1; y++) {
-    for (let x = 0; x < SIZE; x++) {
-      const idx = y * SIZE + x;
-      if (walkable.has(idx)) {
-        seedIndex = idx;
-        break;
-      }
-    }
-  }
-
-  if (seedIndex === -1) {
-    throw new Error("No walkable knot pixels were found.");
-  }
-
+function floodFill(seed: number, walkable: Set<number>, visited: Set<number>) {
   const component = new Set<number>();
-  const stack = [seedIndex];
+  const stack = [seed];
   while (stack.length > 0) {
     const idx = stack.pop();
-    if (idx == null || component.has(idx) || !walkable.has(idx)) continue;
+    if (idx == null || visited.has(idx) || !walkable.has(idx)) continue;
+    visited.add(idx);
     component.add(idx);
     const x = idx % SIZE;
     const y = Math.floor(idx / SIZE);
@@ -205,13 +193,41 @@ function floodConnectedComponent(walkable: Set<number>) {
     if (x < SIZE - 1 && y < SIZE - 1) stack.push(idx + SIZE + 1);
   }
 
-  console.log("Connected component pixel count:", component.size);
   return component;
 }
 
+function findLargestComponent(walkable: Set<number>) {
+  const visited = new Set<number>();
+  let largestComponent = new Set<number>();
+  for (const idx of walkable) {
+    if (visited.has(idx)) continue;
+    const component = floodFill(idx, walkable, visited);
+    if (component.size > largestComponent.size) {
+      largestComponent = component;
+    }
+  }
+  return largestComponent;
+}
+
+function extractLargestComponent(data: Uint8ClampedArray) {
+  let threshold = INITIAL_THRESHOLD;
+  let largestComponent = new Set<number>();
+  while (threshold >= MIN_THRESHOLD && largestComponent.size < COMPONENT_TARGET_SIZE) {
+    const walkable = extractWalkablePixels(data, threshold);
+    largestComponent = findLargestComponent(walkable);
+    console.log(`Threshold ${threshold}: largest component = ${largestComponent.size} pixels`);
+    if (largestComponent.size < COMPONENT_TARGET_SIZE) threshold -= 10;
+  }
+  console.log("Final threshold used:", threshold);
+  console.log("Final component size:", largestComponent.size);
+  if (largestComponent.size === 0) {
+    throw new Error("No walkable knot pixels were found.");
+  }
+  return largestComponent;
+}
+
 function buildMazeGraphFromImageData(data: Uint8ClampedArray): MazeGraph {
-  const walkable = extractWalkablePixels(data);
-  const component = floodConnectedComponent(walkable);
+  const component = extractLargestComponent(data);
   const nodesMap = new Map<NodeId, MazeNode>();
 
   for (const idx of component) {
