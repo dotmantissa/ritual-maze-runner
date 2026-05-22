@@ -3,12 +3,6 @@ import RitualMaze from "@/components/RitualMaze";
 
 export const Route = createFileRoute("/")({
   component: Index,
-  head: () => ({
-    meta: [
-      { title: "Ritual Knot Maze" },
-      { name: "description", content: "Trace the Ritual knot — a minimal browser maze game." },
-    ],
-  }),
 });
 
 function Index() {

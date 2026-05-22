@@ -85,6 +85,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
+      { name: "twitter:title", content: "Ritual Knot Maze" },
+      {
+        name: "twitter:description",
+        content: "Navigate a Celtic-knot maze from the green start to the gold exit.",
+      },
     ],
     links: [
       {
