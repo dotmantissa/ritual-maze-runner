@@ -20,7 +20,7 @@ type MazeGraph = {
   startNode: MazeNode;
   exitNode: MazeNode;
   solutionPath: NodeId[];
-  walkable: Set<string>;
+  walkable: Set<number>;
 };
 
 type HintArrow = {
@@ -38,7 +38,6 @@ type EthereumProvider = {
 
 const SIZE = 480;
 const CELL = 14;
-const GRID = Math.floor(SIZE / CELL);
 const THRESHOLD = 150;
 const PLAYER_R = 6;
 const BEST_KEY = "ritual-knot-best-time";
@@ -95,24 +94,6 @@ function edgeEntries(edges: DirectionalEdges): Array<[Dir, NodeId]> {
   );
 }
 
-function isWalkablePixel(walkable: Set<string>, x: number, y: number) {
-  const px = Math.round(x);
-  const py = Math.round(y);
-  if (px < 0 || py < 0 || px >= SIZE || py >= SIZE) return false;
-  return walkable.has(`${px},${py}`);
-}
-
-function lineIsWalkable(walkable: Set<string>, from: MazeNode, to: MazeNode, samples: number) {
-  let hits = 0;
-  for (let i = 0; i < samples; i++) {
-    const t = samples === 1 ? 0 : i / (samples - 1);
-    const x = from.cx + (to.cx - from.cx) * t;
-    const y = from.cy + (to.cy - from.cy) * t;
-    if (isWalkablePixel(walkable, x, y)) hits += 1;
-  }
-  return hits >= samples - 1;
-}
-
 function bfsSolutionPath(graph: Omit<MazeGraph, "solutionPath">) {
   const queue: NodeId[] = [graph.startNode.id];
   const visited = new Set<NodeId>([graph.startNode.id]);
@@ -143,66 +124,92 @@ function bfsSolutionPath(graph: Omit<MazeGraph, "solutionPath">) {
   return path.reverse();
 }
 
-function extractWalkablePixels(data: Uint8ClampedArray, threshold = THRESHOLD) {
-  const walkable = new Set<string>();
+function extractWalkablePixels(data: Uint8ClampedArray) {
+  const walkable = new Set<number>();
   for (let y = 0; y < SIZE; y++) {
     for (let x = 0; x < SIZE; x++) {
       const i = (y * SIZE + x) * 4;
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
-      if (r > threshold && g > threshold && b > threshold) {
-        walkable.add(`${x},${y}`);
+      if (r > THRESHOLD && g > THRESHOLD && b > THRESHOLD) {
+        walkable.add(y * SIZE + x);
       }
     }
   }
   return walkable;
 }
 
-function buildMazeGraphFromImageData(data: Uint8ClampedArray, threshold = THRESHOLD): MazeGraph {
-  const walkable = extractWalkablePixels(data, threshold);
-  const nodeGrid: Array<Array<MazeNode | null>> = Array.from({ length: GRID }, () =>
-    Array.from({ length: GRID }, () => null),
-  );
-  const nodesMap = new Map<NodeId, MazeNode>();
-
-  for (let col = 0; col < GRID; col++) {
-    for (let row = 0; row < GRID; row++) {
-      let hasWalkablePixel = false;
-      const x0 = col * CELL;
-      const y0 = row * CELL;
-      const x1 = Math.min(SIZE, x0 + CELL);
-      const y1 = Math.min(SIZE, y0 + CELL);
-      for (let y = y0; y < y1 && !hasWalkablePixel; y++) {
-        for (let x = x0; x < x1; x++) {
-          if (walkable.has(`${x},${y}`)) {
-            hasWalkablePixel = true;
-            break;
-          }
-        }
-      }
-
-      if (hasWalkablePixel) {
-        const id = `${col},${row}`;
-        const node: MazeNode = {
-          id,
-          col,
-          row,
-          cx: col * CELL + CELL / 2,
-          cy: row * CELL + CELL / 2,
-          edges: emptyEdges(),
-        };
-        nodeGrid[col][row] = node;
-        nodesMap.set(id, node);
+function floodConnectedComponent(walkable: Set<number>) {
+  let seedIndex = -1;
+  for (let y = 0; y < SIZE && seedIndex === -1; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      const idx = y * SIZE + x;
+      if (walkable.has(idx)) {
+        seedIndex = idx;
+        break;
       }
     }
   }
 
+  if (seedIndex === -1) {
+    throw new Error("No walkable knot pixels were found.");
+  }
+
+  const component = new Set<number>();
+  const stack = [seedIndex];
+  while (stack.length > 0) {
+    const idx = stack.pop();
+    if (idx == null || component.has(idx) || !walkable.has(idx)) continue;
+    component.add(idx);
+    const x = idx % SIZE;
+    const y = Math.floor(idx / SIZE);
+    if (x > 0) stack.push(idx - 1);
+    if (x < SIZE - 1) stack.push(idx + 1);
+    if (y > 0) stack.push(idx - SIZE);
+    if (y < SIZE - 1) stack.push(idx + SIZE);
+    if (x > 0 && y > 0) stack.push(idx - SIZE - 1);
+    if (x < SIZE - 1 && y > 0) stack.push(idx - SIZE + 1);
+    if (x > 0 && y < SIZE - 1) stack.push(idx + SIZE - 1);
+    if (x < SIZE - 1 && y < SIZE - 1) stack.push(idx + SIZE + 1);
+  }
+
+  console.log("Connected component pixel count:", component.size);
+  return component;
+}
+
+function buildMazeGraphFromImageData(data: Uint8ClampedArray): MazeGraph {
+  const walkable = extractWalkablePixels(data);
+  const component = floodConnectedComponent(walkable);
+  const nodesMap = new Map<NodeId, MazeNode>();
+
+  for (const idx of component) {
+    const x = idx % SIZE;
+    const y = Math.floor(idx / SIZE);
+    const col = Math.floor(x / CELL);
+    const row = Math.floor(y / CELL);
+    const id = `${col},${row}`;
+    if (!nodesMap.has(id)) {
+      nodesMap.set(id, {
+        id,
+        col,
+        row,
+        cx: col * CELL + CELL / 2,
+        cy: row * CELL + CELL / 2,
+        edges: emptyEdges(),
+      });
+    }
+  }
+  console.log("Nodes after sampling:", nodesMap.size);
+
   for (const node of nodesMap.values()) {
     for (const { name: direction, dc, dr } of DIRECTIONS) {
-      const neighbor = nodeGrid[node.col + dc]?.[node.row + dr];
-      const isDiagonal = dc !== 0 && dr !== 0;
-      if (neighbor && lineIsWalkable(walkable, node, neighbor, isDiagonal ? 7 : 5)) {
+      const neighborKey = `${node.col + dc},${node.row + dr}`;
+      const neighbor = nodesMap.get(neighborKey);
+      if (!neighbor) continue;
+      const mx = Math.round((node.cx + neighbor.cx) / 2);
+      const my = Math.round((node.cy + neighbor.cy) / 2);
+      if (component.has(my * SIZE + mx)) {
         node.edges[direction] = neighbor.id;
       }
     }
@@ -215,7 +222,9 @@ function buildMazeGraphFromImageData(data: Uint8ClampedArray, threshold = THRESH
 
   const startNode = nodes.reduce((top, node) => (node.cy < top.cy ? node : top), nodes[0]);
   const exitNode = nodes.reduce((bottom, node) => (node.cy > bottom.cy ? node : bottom), nodes[0]);
-  const graphBase = { nodesMap, startNode, exitNode, walkable };
+  console.log("START:", startNode);
+  console.log("EXIT:", exitNode);
+  const graphBase = { nodesMap, startNode, exitNode, walkable: component };
   const solutionPath = bfsSolutionPath(graphBase);
   if (solutionPath.length < 2) {
     const visited = new Set<NodeId>();
@@ -267,15 +276,7 @@ function buildGraphFromImage(img: HTMLImageElement) {
   }
   ctx.drawImage(img, 0, 0, SIZE, SIZE);
   const data = ctx.getImageData(0, 0, SIZE, SIZE).data;
-  let lastError: unknown = null;
-  for (const threshold of [THRESHOLD, 140]) {
-    try {
-      return buildMazeGraphFromImageData(data, threshold);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error("Unable to build knot graph.");
+  return buildMazeGraphFromImageData(data);
 }
 
 function getLocalStorageItem(key: string) {
