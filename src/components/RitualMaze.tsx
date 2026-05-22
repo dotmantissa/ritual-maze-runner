@@ -39,7 +39,7 @@ type EthereumProvider = {
 const SIZE = 480;
 const CELL = 14;
 const GRID = Math.floor(SIZE / CELL);
-const THRESHOLD = 180;
+const THRESHOLD = 150;
 const PLAYER_R = 6;
 const BEST_KEY = "ritual-knot-best-time";
 const SWIPE_THRESHOLD = 20;
@@ -72,13 +72,14 @@ function isWalkablePixel(walkable: Set<string>, x: number, y: number) {
 }
 
 function lineIsWalkable(walkable: Set<string>, from: MazeNode, to: MazeNode) {
+  let hits = 0;
   for (let i = 0; i < 5; i++) {
     const t = i / 4;
     const x = from.cx + (to.cx - from.cx) * t;
     const y = from.cy + (to.cy - from.cy) * t;
-    if (!isWalkablePixel(walkable, x, y)) return false;
+    if (isWalkablePixel(walkable, x, y)) hits += 1;
   }
-  return true;
+  return hits >= 4;
 }
 
 function bfsSolutionPath(graph: Omit<MazeGraph, "solutionPath">) {
@@ -192,6 +193,23 @@ function buildMazeGraphFromImageData(data: Uint8ClampedArray, threshold = THRESH
   const graphBase = { nodesMap, startNode, exitNode, walkable };
   const solutionPath = bfsSolutionPath(graphBase);
   if (solutionPath.length < 2) {
+    const visited = new Set<NodeId>();
+    const queue: NodeId[] = [startNode.id];
+    while (queue.length > 0) {
+      const id = queue.shift();
+      if (!id || visited.has(id)) continue;
+      visited.add(id);
+      const node = nodesMap.get(id);
+      if (!node) continue;
+      Object.values(node.edges).forEach((edgeId) => {
+        if (edgeId != null) queue.push(edgeId);
+      });
+    }
+    console.log("Total nodes:", nodesMap.size);
+    console.log("START node:", startNode);
+    console.log("EXIT node:", exitNode);
+    console.log("Nodes reachable from START:", visited.size);
+    console.log("EXIT reachable:", visited.has(exitNode.id));
     throw new Error("The extracted knot graph has no route from start to exit.");
   }
 
@@ -225,7 +243,7 @@ function buildGraphFromImage(img: HTMLImageElement) {
   ctx.drawImage(img, 0, 0, SIZE, SIZE);
   const data = ctx.getImageData(0, 0, SIZE, SIZE).data;
   let lastError: unknown = null;
-  for (const threshold of [THRESHOLD, 170, 160, 150, 140]) {
+  for (const threshold of [THRESHOLD, 140]) {
     try {
       return buildMazeGraphFromImageData(data, threshold);
     } catch (error) {
